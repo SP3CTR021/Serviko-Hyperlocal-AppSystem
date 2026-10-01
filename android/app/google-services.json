@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "217372431910",
+    "project_id": "serviko-yaml",
+    "storage_bucket": "serviko-yaml.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:217372431910:android:a1b08b02cb6c38ebb878e7",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "217372431910-0nq7rf05a3o6aahqr9sf25si3feq9nsu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHKom92segDj1vXM5l-DoelsI8AW2-8DE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "217372431910-0nq7rf05a3o6aahqr9sf25si3feq9nsu.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
