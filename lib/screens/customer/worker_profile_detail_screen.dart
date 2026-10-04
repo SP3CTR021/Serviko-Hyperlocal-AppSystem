@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../../models/worker_profile_model.dart';
 import '../../models/worker_service_model.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/verification_guard.dart';
 import 'create_booking_screen.dart';
+import '../chat/conversation_screen.dart';
 
 class WorkerProfileDetailScreen extends StatelessWidget {
   final WorkerProfileModel worker;
@@ -37,8 +39,32 @@ class WorkerProfileDetailScreen extends StatelessWidget {
                   ],
                 ),
               ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ConversationScreen(
+                        otherUserId: worker.userId,
+                        otherUserName: worker.user?.fullName ?? 'Worker',
+                        serviceTitle: worker.primarySkill,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                label: const Text('Chat'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.sbInk2,
+                  side: const BorderSide(color: AppTheme.sbLine, width: 1.5),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(width: 8),
               ElevatedButton.icon(
                 onPressed: () {
+                  if (!VerificationGuard.check(context, actionName: 'book a service')) return;
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -49,7 +75,7 @@ class WorkerProfileDetailScreen extends StatelessWidget {
                 icon: const Icon(Icons.calendar_today_rounded, size: 18),
                 label: const Text('Book Service'),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 ),
               ),
             ],
@@ -214,6 +240,7 @@ class WorkerProfileDetailScreen extends StatelessWidget {
               const SizedBox(height: 4),
               InkWell(
                 onTap: () {
+                  if (!VerificationGuard.check(context, actionName: 'book a service')) return;
                   Navigator.push(
                     context,
                     MaterialPageRoute(

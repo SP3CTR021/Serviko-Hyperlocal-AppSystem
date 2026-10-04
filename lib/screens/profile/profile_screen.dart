@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../data/database_seeder.dart';
+import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
-import '../auth/login_screen.dart';
+import '../../widgets/profile_completion_modal.dart';
 import '../customer/customer_main_screen.dart';
 import '../landing_page_screen.dart';
 import '../worker/worker_main_screen.dart';
@@ -76,26 +76,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (result != null) {
         final auth = AuthService();
-        final user = auth.currentUser;
-        if (user != null) {
-          // Update Firestore
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.id.toString())
-              .update({'profile_photo_url': result.url});
+        await auth.updateProfilePhoto(result.url);
 
-          // Update local user model
-          auth.updateProfilePhotoUrl(result.url);
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Profile photo updated!'),
-                backgroundColor: AppTheme.sbGreen,
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Profile photo updated!'),
+              backgroundColor: AppTheme.sbGreen,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
       }
     } catch (e) {
@@ -943,12 +933,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildVerificationCard(dynamic user) {
+    final isVerified = user?.isVerified == true;
+    final progress = user != null ? (user is UserModel ? user.profileCompletionPercentage : (isVerified ? 100 : 30)) : 30;
+    final hasPhoto = user?.profilePhotoUrl != null && user!.profilePhotoUrl!.isNotEmpty;
+    final hasPhone = user?.phoneNumber != null && user!.phoneNumber!.isNotEmpty;
+    final hasLocation = (user?.city != null && user!.city!.isNotEmpty) || (user?.barangay != null && user!.barangay!.isNotEmpty);
+    final hasId = isVerified || (user?.idNumber != null && user!.idNumber!.isNotEmpty);
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.sbLine),
+        border: Border.all(
+          color: isVerified ? AppTheme.sbGreen.withValues(alpha: 0.35) : const Color(0xFFFDE68A),
+          width: 1.5,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -958,28 +965,97 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: AppTheme.sbGreen.withOpacity(0.12),
+                  color: isVerified ? AppTheme.sbGreen.withValues(alpha: 0.12) : const Color(0xFFFEF3C7),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.verified_user_rounded, color: AppTheme.sbGreen, size: 18),
+                child: Icon(
+                  isVerified ? Icons.verified_user_rounded : Icons.shield_outlined,
+                  color: isVerified ? AppTheme.sbGreen : const Color(0xFFD97706),
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 10),
-              const Text(
-                'Verification Status',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.sbInk,
+              Expanded(
+                child: Text(
+                  isVerified ? 'Profile 100% Verified' : 'Verification Status: $progress%',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.sbInk,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isVerified ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isVerified ? const Color(0xFF86EFAC) : const Color(0xFFFDE68A),
+                  ),
+                ),
+                child: Text(
+                  isVerified ? 'VERIFIED' : 'UNVERIFIED',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    color: isVerified ? const Color(0xFF166534) : const Color(0xFF92400E),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          _buildCheckRow('Valid Government ID (PhilSys / Driver\'s License)', true),
+          const SizedBox(height: 12),
+          if (!isVerified) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: progress / 100.0,
+                minHeight: 6,
+                backgroundColor: const Color(0xFFE2E8F0),
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFF59E0B)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              '⚠️ You cannot book services or create job offers until your profile is verified with valid government ID.',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF92400E),
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          _buildCheckRow('Valid Government ID Document', hasId),
           const SizedBox(height: 8),
-          _buildCheckRow('Barangay Clearance & Police Clearance', true),
+          _buildCheckRow('Verified Contact Number', hasPhone),
           const SizedBox(height: 8),
-          _buildCheckRow('Verified Contact Number', true),
+          _buildCheckRow('Location & Service Address', hasLocation),
+          const SizedBox(height: 8),
+          _buildCheckRow('Profile Portrait Photo', hasPhoto),
+          if (!isVerified) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              height: 42,
+              child: ElevatedButton.icon(
+                onPressed: () => showProfileCompletionModal(context),
+                icon: const Icon(Icons.verified_user_rounded, size: 16),
+                label: const Text(
+                  'Complete & Verify Profile',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFD97706),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

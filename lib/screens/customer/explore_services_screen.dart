@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../models/booking_model.dart';
-import '../../models/worker_profile_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/profile_completion_banner.dart';
+import '../../utils/verification_guard.dart';
 import '../chat/conversation_screen.dart';
 
 class ExploreServicesScreen extends StatefulWidget {
@@ -68,6 +69,7 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
       final colorHex = wp.avatarColor?.replaceFirst('#', '0xFF') ?? '0xFF1B9457';
       final parsedColor = Color(int.tryParse(colorHex) ?? 0xFF1B9457);
       return {
+        'id': wp.userId,
         'n': name,
         'i': wp.initials ?? (name.isNotEmpty ? name[0] : 'W'),
         'c': parsedColor,
@@ -125,6 +127,8 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
   }
 
   void _openBookingSheet(Map<String, dynamic> worker) {
+    if (!VerificationGuard.check(context, actionName: 'book a service')) return;
+
     final today = DateTime.now();
     final dateStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     String selectedTime = '9:00 AM';
@@ -574,11 +578,12 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: MySqlService(),
+      listenable: Listenable.merge([MySqlService(), AuthService()]),
       builder: (context, _) {
         final workers = _getFilteredWorkers();
         final currentUser = AuthService().currentUser;
         final userName = currentUser?.fullName ?? currentUser?.name ?? 'User';
+        final userPhotoUrl = currentUser?.profilePhotoUrl;
         final userInitials = (userName.isNotEmpty && userName != 'User')
             ? userName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join().toUpperCase()
             : 'U';
@@ -626,73 +631,96 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                     bottom: false,
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(18, 14, 18, 76),
-                      child: Row(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.18),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
-                            ),
-                            child: Center(
-                              child: Text(
-                                userInitials,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Good day,',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white70,
+                          Row(
+                            children: [
+                              GestureDetector(
+                                onTap: widget.onOpenDrawer,
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(15),
+                                    child: (userPhotoUrl != null && userPhotoUrl.isNotEmpty)
+                                        ? Image.network(
+                                            userPhotoUrl,
+                                            width: 44,
+                                            height: 44,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) => const Center(
+                                              child: Icon(
+                                                Icons.person_rounded,
+                                                color: Colors.white,
+                                                size: 24,
+                                              ),
+                                            ),
+                                          )
+                                        : const Center(
+                                            child: Icon(
+                                              Icons.person_rounded,
+                                              color: Colors.white,
+                                              size: 24,
+                                            ),
+                                          ),
                                   ),
                                 ),
-                                Text(
-                                  userName,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                    color: Colors.white,
-                                    letterSpacing: -0.2,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.notifications_none_rounded, color: Colors.white),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('No new notifications')),
-                              );
-                            },
-                          ),
-                          GestureDetector(
-                            onTap: widget.onOpenDrawer,
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(13),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
                               ),
-                              child: const Icon(Icons.menu_rounded, color: Colors.white, size: 20),
-                            ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Good day,',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    Text(
+                                      userName,
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                        letterSpacing: -0.2,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.notifications_none_rounded, color: Colors.white),
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('No new notifications')),
+                                  );
+                                },
+                              ),
+                              GestureDetector(
+                                onTap: widget.onOpenDrawer,
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(13),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                                  ),
+                                  child: const Icon(Icons.menu_rounded, color: Colors.white, size: 20),
+                                ),
+                              ),
+                            ],
                           ),
+                          const ProfileCompletionBanner(margin: EdgeInsets.only(top: 10)),
                         ],
                       ),
                     ),
@@ -1135,6 +1163,7 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => ConversationScreen(
+                                          otherUserId: w['id'] as int?,
                                           otherUserName: w['n'] as String,
                                           serviceTitle: w['s'] as String,
                                         ),

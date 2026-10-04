@@ -4,6 +4,8 @@ import '../../models/job_post_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/profile_completion_banner.dart';
+import '../../utils/verification_guard.dart';
 
 class WorkerDashboardScreen extends StatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -23,6 +25,8 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
   bool _isAvailable = true;
 
   void _openBidModal(JobPostModel job) {
+    if (!VerificationGuard.check(context, actionName: 'submit a bid on this job')) return;
+
     final priceCtrl = TextEditingController(text: '${job.budgetMin?.toInt() ?? 500}');
     final msgCtrl = TextEditingController();
     String duration = '1–2 hours';
@@ -182,6 +186,7 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
   Widget build(BuildContext context) {
     final currentUser = AuthService().currentUser;
     final userName = currentUser?.fullName ?? currentUser?.name ?? 'Worker';
+    final userPhotoUrl = currentUser?.profilePhotoUrl;
     final userInitials = (userName.isNotEmpty && userName != 'Worker')
         ? userName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join().toUpperCase()
         : 'W';
@@ -230,22 +235,39 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                         children: [
                           Row(
                             children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.18),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    userInitials,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                              GestureDetector(
+                                onTap: widget.onOpenDrawer,
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(15),
+                                    child: (userPhotoUrl != null && userPhotoUrl.isNotEmpty)
+                                        ? Image.network(
+                                            userPhotoUrl,
+                                            width: 44,
+                                            height: 44,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) => const Center(
+                                              child: Icon(
+                                                Icons.person_rounded,
+                                                color: Colors.white,
+                                                size: 24,
+                                              ),
+                                            ),
+                                          )
+                                        : const Center(
+                                            child: Icon(
+                                              Icons.person_rounded,
+                                              color: Colors.white,
+                                              size: 24,
+                                            ),
+                                          ),
                                   ),
                                 ),
                               ),
@@ -297,7 +319,8 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 18),
+                          const ProfileCompletionBanner(margin: EdgeInsets.only(top: 10)),
+                          const SizedBox(height: 14),
 
                           // Availability Banner Switch
                           Container(
@@ -380,6 +403,7 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+
                   // Monthly Earnings Card with Bar Chart
                   Container(
                     padding: const EdgeInsets.all(18),

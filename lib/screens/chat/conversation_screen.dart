@@ -1,20 +1,25 @@
 import 'package:flutter/material.dart';
 import '../../models/booking_model.dart';
 import '../../models/message_model.dart';
+import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/booking_completion_modal.dart';
 
 class ConversationScreen extends StatefulWidget {
   final BookingModel? booking;
   final String otherUserName;
   final String? serviceTitle;
+  final int? otherUserId;
 
   const ConversationScreen({
     super.key,
     this.booking,
     required this.otherUserName,
     this.serviceTitle,
+    this.otherUserId,
   });
 
   @override
@@ -24,38 +29,6 @@ class ConversationScreen extends StatefulWidget {
 class _ConversationScreenState extends State<ConversationScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
-  final List<Map<String, dynamic>> _localMessages = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _seedInitialMessages();
-  }
-
-  void _seedInitialMessages() {
-    // If there are existing messages in MySqlService for this booking, we don't need dummy seeds
-    if (widget.booking != null) {
-      final existing = MySqlService()
-          .messages
-          .where((m) => m.bookingId == widget.booking!.bookingId)
-          .toList();
-      if (existing.isNotEmpty) return;
-    }
-
-    // Default conversational starter
-    _localMessages.addAll([
-      {
-        'isMe': false,
-        'text': 'Good day! How are you? I am ready for the scheduled service.',
-        'time': '10:14 AM',
-      },
-      {
-        'isMe': true,
-        'text': 'Good day! Thank you. Yes, the place is ready.',
-        'time': '10:16 AM',
-      },
-    ]);
-  }
 
   @override
   void dispose() {
@@ -69,38 +42,44 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (text.isEmpty) return;
 
     final now = DateTime.now();
-    final timeStr =
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
-    setState(() {
-      _localMessages.add({
-        'isMe': true,
-        'text': text,
-        'time': timeStr,
-      });
-    });
-
     _messageController.clear();
 
+    final currentUserId = AuthService().currentUser?.id ?? 1;
+    final otherUserId = widget.otherUserId ??
+        (widget.booking != null
+            ? (currentUserId == widget.booking!.customerId ? widget.booking!.workerId : widget.booking!.customerId)
+            : 0);
+
+    UserModel? receiverUser;
     if (widget.booking != null) {
-      final currentUserId = AuthService().currentUser?.id ?? 1;
-      final otherUserId = currentUserId == widget.booking!.customerId
-          ? widget.booking!.workerId
-          : widget.booking!.customerId;
-
-      final newMsg = MessageModel(
-        messageId: DateTime.now().millisecondsSinceEpoch % 100000,
-        bookingId: widget.booking!.bookingId,
-        senderId: currentUserId,
-        receiverId: otherUserId,
-        content: text,
-        isRead: false,
-        sentAt: now,
-        sender: AuthService().currentUser,
-      );
-
-      await MySqlService().sendMessage(newMsg);
+      receiverUser = currentUserId == widget.booking!.customerId
+          ? widget.booking!.worker
+          : widget.booking!.customer;
     }
+    if (receiverUser == null && otherUserId != 0) {
+      receiverUser = UserModel(
+        id: otherUserId,
+        name: widget.otherUserName,
+        fullName: widget.otherUserName,
+        email: '',
+        role: 'user',
+      );
+    }
+
+    final newMsg = MessageModel(
+      messageId: DateTime.now().millisecondsSinceEpoch % 1000000,
+      bookingId: widget.booking?.bookingId,
+      senderId: currentUserId,
+      receiverId: otherUserId,
+      content: text,
+      isRead: false,
+      sentAt: now,
+      sender: AuthService().currentUser,
+      receiver: receiverUser,
+    );
+
+    await FirestoreService().sendMessage(newMsg);
+    await MySqlService().sendMessage(newMsg);
 
     _scrollToBottom();
   }
@@ -281,20 +260,58 @@ class _ConversationScreenState extends State<ConversationScreen> {
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFD4E7DC)),
-                    ),
-                    child: Text(
-                      widget.booking?.status.toUpperCase() ?? 'ACTIVE',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.sbGreen,
-                        letterSpacing: 0.5,
+                  InkWell(
+                    onTap: widget.booking == null
+                        ? null
+                        : () {
+                            if (widget.booking!.isCompleted) {
+                              showBookingReceiptDialog(
+                                context: context,
+                                booking: widget.booking!,
+                                isCustomer: AuthService().currentUser?.isCustomer ?? true,
+                              );
+                            } else {
+                              showBookingCompletionModal(
+                                context: context,
+                                booking: widget.booking!,
+                                isCustomer: AuthService().currentUser?.isCustomer ?? true,
+                                onCompleted: () {
+                                  if (mounted) setState(() {});
+                                },
+                              );
+                            }
+                          },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFD4E7DC)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            widget.booking?.isCompleted == true
+                                ? Icons.receipt_long_rounded
+                                : Icons.check_circle_outline_rounded,
+                            size: 13,
+                            color: AppTheme.sbGreen,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.booking?.isCompleted == true
+                                ? 'RECEIPT'
+                                : (widget.booking != null ? 'COMPLETE' : 'ACTIVE'),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.sbGreen,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -304,98 +321,83 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
           // Messages View
           Expanded(
-            child: ListenableBuilder(
-              listenable: MySqlService(),
-              builder: (context, _) {
+            child: Builder(
+              builder: (context) {
                 final currentUserId = AuthService().currentUser?.id ?? 1;
-                final dbMsgs = widget.booking != null
-                    ? MySqlService()
-                        .messages
-                        .where((m) => m.bookingId == widget.booking!.bookingId)
-                        .toList()
-                    : <MessageModel>[];
+                final otherUserId = widget.otherUserId ??
+                    (widget.booking != null
+                        ? (currentUserId == widget.booking!.customerId ? widget.booking!.workerId : widget.booking!.customerId)
+                        : 0);
 
-                final totalCount = dbMsgs.length + _localMessages.length;
+                return StreamBuilder<List<MessageModel>>(
+                  stream: FirestoreService().getConversationStream(
+                    bookingId: widget.booking?.bookingId,
+                    currentUserId: currentUserId,
+                    otherUserId: otherUserId,
+                  ),
+                  builder: (context, snapshot) {
+                    final allMsgs = snapshot.data ??
+                        MySqlService().messages.where((m) {
+                          if (widget.booking != null && m.bookingId == widget.booking!.bookingId) return true;
+                          if (otherUserId != 0) {
+                            return (m.senderId == currentUserId && m.receiverId == otherUserId) ||
+                                   (m.senderId == otherUserId && m.receiverId == currentUserId);
+                          }
+                          return false;
+                        }).toList();
 
-                return ListView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                  children: [
-                    // Date Divider
-                    Center(
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 18),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: AppTheme.sbLine),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.02),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                        child: const Text(
-                          'Today',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.sbInkSoft,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // Render db messages if any
-                    for (final msg in dbMsgs) ...[
-                      _buildMessageBubble(
-                        isMe: msg.senderId == currentUserId,
-                        text: msg.content ?? '',
-                        time: msg.sentAt != null
-                            ? '${msg.sentAt!.hour.toString().padLeft(2, '0')}:${msg.sentAt!.minute.toString().padLeft(2, '0')}'
-                            : '',
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-
-                    // Render local messages
-                    for (final loc in _localMessages) ...[
-                      _buildMessageBubble(
-                        isMe: loc['isMe'] as bool,
-                        text: loc['text'] as String,
-                        time: loc['time'] as String,
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-
-                    if (totalCount == 0)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 40),
-                        child: Center(
+                    if (allMsgs.isEmpty) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(40),
                           child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
                                 Icons.chat_bubble_outline_rounded,
-                                size: 40,
-                                color: AppTheme.sbInkFaint.withOpacity(0.5),
+                                size: 48,
+                                color: AppTheme.sbInk4.withOpacity(0.5),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 12),
                               const Text(
-                                'No messages yet.\nStart the conversation!',
-                                textAlign: TextAlign.center,
+                                'No messages yet',
                                 style: TextStyle(
-                                  fontSize: 13,
-                                  color: AppTheme.sbInkSoft,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.sbInk,
                                 ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Send a message to ${widget.otherUserName} to begin coordinates!',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 13, color: AppTheme.sbInk4),
                               ),
                             ],
                           ),
                         ),
-                      ),
-                  ],
+                      );
+                    }
+
+                    return ListView.separated(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      itemCount: allMsgs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, idx) {
+                        final msg = allMsgs[idx];
+                        final isMe = msg.senderId == currentUserId;
+                        final timeStr = msg.sentAt != null
+                            ? '${msg.sentAt!.hour.toString().padLeft(2, '0')}:${msg.sentAt!.minute.toString().padLeft(2, '0')}'
+                            : '';
+                        return _buildMessageBubble(
+                          isMe: isMe,
+                          text: msg.content ?? '',
+                          time: timeStr,
+                        );
+                      },
+                    );
+                  },
                 );
               },
             ),

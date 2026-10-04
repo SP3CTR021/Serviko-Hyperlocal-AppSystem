@@ -3,6 +3,7 @@ import '../../models/bid_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/verification_guard.dart';
 
 class JobMarketplaceScreen extends StatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -76,6 +77,8 @@ class _JobMarketplaceScreenState extends State<JobMarketplaceScreen> {
   }
 
   void _openBidModal(Map<String, dynamic> job) {
+    if (!VerificationGuard.check(context, actionName: 'submit a bid on this job')) return;
+
     final priceCtrl = TextEditingController(text: '650');
     final msgCtrl = TextEditingController();
     String duration = '1–2 hours';
@@ -311,6 +314,7 @@ class _JobMarketplaceScreenState extends State<JobMarketplaceScreen> {
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
               child: Column(
           children: [
+
             // Filter Pills
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,

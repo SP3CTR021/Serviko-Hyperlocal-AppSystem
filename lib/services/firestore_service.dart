@@ -227,6 +227,93 @@ class FirestoreService extends ChangeNotifier {
     }
   }
 
+  Future<bool> completeBooking({
+    required int bookingId,
+    String? paymentMethod,
+    String? paymentStatus,
+    double? totalAmount,
+    double? commissionRate,
+    double? commissionAmount,
+    double? netAmount,
+    String? completionNotes,
+    int? rating,
+    String? reviewComment,
+  }) async {
+    try {
+      final now = DateTime.now();
+      final updates = <String, dynamic>{
+        'status': 'completed',
+        'completed_at': now.toIso8601String(),
+      };
+      if (paymentMethod != null) updates['payment_method'] = paymentMethod;
+      if (paymentStatus != null) updates['payment_status'] = paymentStatus;
+      if (totalAmount != null) updates['total_amount'] = totalAmount;
+      if (commissionRate != null) updates['commission_rate'] = commissionRate;
+      if (commissionAmount != null) updates['commission_amount'] = commissionAmount;
+      if (netAmount != null) updates['net_amount'] = netAmount;
+      if (completionNotes != null && completionNotes.isNotEmpty) updates['completion_notes'] = completionNotes;
+      if (rating != null) updates['rating'] = rating;
+      if (reviewComment != null && reviewComment.isNotEmpty) updates['review_comment'] = reviewComment;
+
+      await _bookingsCol.doc(bookingId.toString()).update(updates);
+
+      // If rating was provided, save review & update worker stats
+      if (rating != null && rating > 0) {
+        final bSnap = await _bookingsCol.doc(bookingId.toString()).get();
+        if (bSnap.exists) {
+          final bMap = bSnap.data() as Map<String, dynamic>;
+          final cId = bMap['customer_id'] is int
+              ? bMap['customer_id']
+              : int.tryParse(bMap['customer_id']?.toString() ?? '0') ?? 0;
+          final wId = bMap['worker_id'] is int
+              ? bMap['worker_id']
+              : int.tryParse(bMap['worker_id']?.toString() ?? '0') ?? 0;
+
+          UserModel? customer;
+          if (bMap['customer'] is Map<String, dynamic>) {
+            customer = UserModel.fromMap(bMap['customer'] as Map<String, dynamic>);
+          }
+
+          final newReview = ReviewModel(
+            reviewId: DateTime.now().millisecondsSinceEpoch % 100000,
+            bookingId: bookingId,
+            reviewerId: cId,
+            revieweeId: wId,
+            reviewerRole: 'customer',
+            rating: rating,
+            comment: reviewComment,
+            createdAt: now,
+            reviewer: customer,
+          );
+          await createReview(newReview);
+
+          try {
+            final wDoc = await _workersCol.doc(wId.toString()).get();
+            if (wDoc.exists) {
+              final wData = wDoc.data() as Map<String, dynamic>;
+              final currentJobs = (wData['total_jobs_completed'] as int?) ?? 0;
+              final currentRating = ((wData['avg_rating'] ?? 5.0) as num).toDouble();
+              final newJobs = currentJobs + 1;
+              final newAvg = ((currentRating * currentJobs) + rating) / newJobs;
+              await _workersCol.doc(wId.toString()).update({
+                'total_jobs_completed': newJobs,
+                'avg_rating': double.parse(newAvg.toStringAsFixed(1)),
+              });
+            }
+          } catch (e) {
+            debugPrint('[FirestoreService] update worker rating note: $e');
+          }
+        }
+      }
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('[FirestoreService] completeBooking error: $e');
+      return false;
+    }
+  }
+
   Future<bool> deleteBooking(int bookingId) async {
     try {
       await _bookingsCol.doc(bookingId.toString()).delete();
@@ -383,13 +470,56 @@ class FirestoreService extends ChangeNotifier {
   Stream<List<MessageModel>> getMessagesStream(int bookingId) {
     return _messagesCol
         .where('booking_id', isEqualTo: bookingId)
-        .orderBy('created_at', descending: false)
         .snapshots()
         .map((snap) {
       if (snap.docs.isEmpty) return [];
-      return snap.docs
+      final list = snap.docs
           .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
           .toList();
+      list.sort((a, b) => (a.sentAt ?? DateTime(2000)).compareTo(b.sentAt ?? DateTime(2000)));
+      return list;
+    });
+  }
+
+  Stream<List<MessageModel>> getAllMessagesStream() {
+    return _messagesCol.snapshots().map((snap) {
+      if (snap.docs.isEmpty) return [];
+      final list = snap.docs
+          .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
+          .toList();
+      list.sort((a, b) => (a.sentAt ?? DateTime(2000)).compareTo(b.sentAt ?? DateTime(2000)));
+      return list;
+    });
+  }
+
+  Stream<List<MessageModel>> getConversationStream({
+    int? bookingId,
+    int? currentUserId,
+    int? otherUserId,
+  }) {
+    return _messagesCol.snapshots().map((snap) {
+      if (snap.docs.isEmpty) return [];
+      final all = snap.docs
+          .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
+          .toList();
+
+      final filtered = all.where((m) {
+        if (bookingId != null && m.bookingId == bookingId) return true;
+        if (currentUserId != null && otherUserId != null) {
+          final isMatch = (m.senderId == currentUserId && m.receiverId == otherUserId) ||
+                          (m.senderId == otherUserId && m.receiverId == currentUserId);
+          if (isMatch) return true;
+        }
+        return false;
+      }).toList();
+
+      filtered.sort((a, b) {
+        final aTime = a.sentAt ?? DateTime(2000);
+        final bTime = b.sentAt ?? DateTime(2000);
+        return aTime.compareTo(bTime);
+      });
+
+      return filtered;
     });
   }
 
@@ -418,6 +548,12 @@ class FirestoreService extends ChangeNotifier {
       final map = message.toMap();
       map['message_id'] = int.tryParse(docId) ?? message.messageId;
       map['created_at'] = DateTime.now().toIso8601String();
+      if (message.sender != null) {
+        map['sender'] = message.sender!.toMap();
+      }
+      if (message.receiver != null) {
+        map['receiver'] = message.receiver!.toMap();
+      }
 
       await _messagesCol.doc(docId).set(map);
       notifyListeners();

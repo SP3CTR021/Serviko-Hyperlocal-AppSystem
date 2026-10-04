@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user_model.dart';
-import '../data/sample_data.dart';
 import 'mysql_service.dart';
 
 class AuthService extends ChangeNotifier {
@@ -88,6 +87,7 @@ class AuthService extends ChangeNotifier {
             final displayName = user.displayName ?? (user.email?.split('@').first ?? 'Google User');
             final newUser = UserModel(
               id: user.uid.hashCode,
+              uid: user.uid,
               name: displayName.split(' ').first,
               fullName: displayName,
               email: user.email ?? '',
@@ -96,7 +96,7 @@ class AuthService extends ChangeNotifier {
               profilePhotoUrl: user.photoURL,
               memberSince: DateTime.now(),
             );
-            await _firestore.collection('users').doc(user.uid).set(newUser.toMap());
+            await _firestore.collection('users').doc(user.uid).set(newUser.toMap(), SetOptions(merge: true));
             loadedUser = newUser;
           }
         } catch (e) {
@@ -106,6 +106,7 @@ class AuthService extends ChangeNotifier {
         final displayName = user.displayName ?? (user.email?.split('@').first ?? 'Google User');
         _currentUser = loadedUser ?? UserModel(
           id: user.uid.hashCode,
+          uid: user.uid,
           name: displayName.split(' ').first,
           fullName: displayName,
           email: user.email ?? '',
@@ -189,11 +190,23 @@ class AuthService extends ChangeNotifier {
         final displayName = userCred.user!.displayName ?? email.split('@').first;
         _currentUser = loadedUser ?? UserModel(
           id: userCred.user!.uid.hashCode,
+          uid: userCred.user!.uid,
           name: displayName.split(' ').first,
           fullName: displayName,
           email: email,
           role: email.contains('worker') ? 'worker' : 'customer',
         );
+
+        // Ensure user document exists in Firestore (with merge)
+        try {
+          await _firestore.collection('users').doc(userCred.user!.uid).set(
+            _currentUser!.toMap(),
+            SetOptions(merge: true),
+          );
+        } catch (e) {
+          debugPrint('[AuthService] Firestore user ensure note: $e');
+        }
+
         _isLoading = false;
         notifyListeners();
         return true;
@@ -248,6 +261,7 @@ class AuthService extends ChangeNotifier {
 
         final newUser = UserModel(
           id: fbCred.user!.uid.hashCode,
+          uid: fbCred.user!.uid,
           name: fullName.split(' ').first,
           fullName: fullName,
           email: email,
@@ -260,7 +274,10 @@ class AuthService extends ChangeNotifier {
         );
 
         try {
-          await _firestore.collection('users').doc(fbCred.user!.uid).set(newUser.toMap());
+          await _firestore.collection('users').doc(fbCred.user!.uid).set(
+            newUser.toMap(),
+            SetOptions(merge: true),
+          );
         } catch (e) {
           debugPrint('[AuthService] Firestore user write note: $e');
         }
@@ -299,18 +316,148 @@ class AuthService extends ChangeNotifier {
     return false;
   }
 
-  void updateProfilePhotoUrl(String url) {
+  // UPDATE PROFILE PHOTO (Firestore + Firebase Auth + Local State)
+  Future<void> updateProfilePhoto(String url) async {
     if (_currentUser != null) {
       _currentUser = _currentUser!.copyWith(profilePhotoUrl: url);
       notifyListeners();
     }
+
+    // 1. Update Firebase Auth user photoURL
+    try {
+      final fb = firebaseUser;
+      if (fb != null) {
+        await fb.updatePhotoURL(url);
+      }
+    } catch (e) {
+      debugPrint('[AuthService] Firebase updatePhotoURL note: $e');
+    }
+
+    final dataToMerge = _currentUser != null
+        ? _currentUser!.toMap()
+        : <String, dynamic>{'profile_photo_url': url};
+
+    // 2. Set/merge Firestore user doc under Firebase UID
+    final fbUid = firebaseUser?.uid ?? _currentUser?.uid;
+    if (fbUid != null && fbUid.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(fbUid)
+            .set(dataToMerge, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('[AuthService] Firestore updatePhoto (uid) note: $e');
+      }
+    }
+
+    // 3. Set/merge Firestore user doc under numeric ID
+    if (_currentUser != null) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(_currentUser!.id.toString())
+            .set(dataToMerge, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('[AuthService] Firestore updatePhoto (numeric id) note: $e');
+      }
+
+      // 4. If worker, also update workers collection if worker doc exists
+      try {
+        final workerDoc = await _firestore
+            .collection('workers')
+            .doc(_currentUser!.id.toString())
+            .get();
+        if (workerDoc.exists) {
+          await _firestore
+              .collection('workers')
+              .doc(_currentUser!.id.toString())
+              .set({'user': dataToMerge}, SetOptions(merge: true));
+        }
+      } catch (e) {
+        debugPrint('[AuthService] Firestore update worker photo note: $e');
+      }
+    }
+  }
+
+  void updateProfilePhotoUrl(String url) {
+    updateProfilePhoto(url);
+  }
+
+  // SUBMIT PROFILE VERIFICATION & ID
+  Future<bool> submitVerification({
+    required String idType,
+    required String idNumber,
+    String? idPhotoUrl,
+    String? phoneNumber,
+    String? city,
+    String? barangay,
+    String? profilePhotoUrl,
+  }) async {
+    if (_currentUser == null) return false;
+
+    final updated = _currentUser!.copyWith(
+      idType: idType,
+      idNumber: idNumber,
+      idPhotoUrl: idPhotoUrl ?? _currentUser!.idPhotoUrl,
+      phoneNumber: (phoneNumber != null && phoneNumber.isNotEmpty) ? phoneNumber : _currentUser!.phoneNumber,
+      city: (city != null && city.isNotEmpty) ? city : _currentUser!.city,
+      barangay: (barangay != null && barangay.isNotEmpty) ? barangay : _currentUser!.barangay,
+      profilePhotoUrl: (profilePhotoUrl != null && profilePhotoUrl.isNotEmpty) ? profilePhotoUrl : _currentUser!.profilePhotoUrl,
+      isVerified: true,
+      verifiedAt: DateTime.now(),
+    );
+
+    _currentUser = updated;
+    notifyListeners();
+
+    final data = updated.toMap();
+
+    // 1. Update Firestore under UID
+    final fbUid = firebaseUser?.uid ?? updated.uid;
+    if (fbUid != null && fbUid.isNotEmpty) {
+      try {
+        await _firestore.collection('users').doc(fbUid).set(data, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('[AuthService] Firestore submitVerification (uid) note: $e');
+      }
+    }
+
+    // 2. Update Firestore under numeric id
+    try {
+      await _firestore.collection('users').doc(updated.id.toString()).set(data, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[AuthService] Firestore submitVerification (numeric id) note: $e');
+    }
+
+    // 3. If worker, update workers collection
+    if (updated.isWorker) {
+      try {
+        final workerDoc = await _firestore.collection('workers').doc(updated.id.toString()).get();
+        if (workerDoc.exists) {
+          await _firestore.collection('workers').doc(updated.id.toString()).set({
+            'user': data,
+          }, SetOptions(merge: true));
+        }
+      } catch (_) {}
+    }
+
+    return true;
   }
 
   void switchDemoRole(String role) {
     if (_currentUser != null) {
       _currentUser = _currentUser!.copyWith(role: role);
       try {
-        _firestore.collection('users').doc(_currentUser!.id.toString()).update({'role': role});
+        _firestore.collection('users').doc(_currentUser!.id.toString()).set(
+          {'role': role},
+          SetOptions(merge: true),
+        );
+        if (firebaseUser != null) {
+          _firestore.collection('users').doc(firebaseUser!.uid).set(
+            {'role': role},
+            SetOptions(merge: true),
+          );
+        }
       } catch (_) {}
     } else {
       _currentUser = UserModel(

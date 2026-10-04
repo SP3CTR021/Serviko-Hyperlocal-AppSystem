@@ -203,6 +203,76 @@ class MySqlService extends ChangeNotifier {
     }
   }
 
+  /// Complete Booking with payment details, review, and status update
+  Future<bool> completeBooking({
+    required int bookingId,
+    String? paymentMethod,
+    String? paymentStatus,
+    double? totalAmount,
+    double? commissionRate,
+    double? commissionAmount,
+    double? netAmount,
+    String? completionNotes,
+    int? rating,
+    String? reviewComment,
+  }) async {
+    final idx = _bookings.indexWhere((b) => b.bookingId == bookingId);
+    if (idx != -1) {
+      final old = _bookings[idx];
+      _bookings[idx] = BookingModel(
+        bookingId: old.bookingId,
+        customerId: old.customerId,
+        workerId: old.workerId,
+        workerServiceId: old.workerServiceId,
+        categoryId: old.categoryId,
+        scheduledDate: old.scheduledDate,
+        scheduledTime: old.scheduledTime,
+        serviceAddress: old.serviceAddress,
+        jobDescription: old.jobDescription,
+        status: 'completed',
+        isUrgent: old.isUrgent,
+        cancellationReason: old.cancellationReason,
+        cancelledBy: old.cancelledBy,
+        totalAmount: totalAmount ?? old.totalAmount,
+        createdAt: old.createdAt,
+        customer: old.customer,
+        worker: old.worker,
+        serviceName: old.serviceName,
+        categoryName: old.categoryName,
+        paymentMethod: paymentMethod ?? old.paymentMethod,
+        paymentStatus: paymentStatus ?? old.paymentStatus,
+        completedAt: DateTime.now(),
+        completionNotes: completionNotes ?? old.completionNotes,
+        rating: rating ?? old.rating,
+        reviewComment: reviewComment ?? old.reviewComment,
+        commissionRate: commissionRate ?? old.commissionRate,
+        commissionAmount: commissionAmount ?? old.commissionAmount,
+        netAmount: netAmount ?? old.netAmount,
+      );
+      _safeNotifyListeners();
+    }
+
+    try {
+      final res = await FirestoreService().completeBooking(
+        bookingId: bookingId,
+        paymentMethod: paymentMethod,
+        paymentStatus: paymentStatus,
+        totalAmount: totalAmount,
+        commissionRate: commissionRate,
+        commissionAmount: commissionAmount,
+        netAmount: netAmount,
+        completionNotes: completionNotes,
+        rating: rating,
+        reviewComment: reviewComment,
+      );
+      await refreshData();
+      return res;
+    } catch (e) {
+      debugPrint('[AppDataService] completeBooking error: $e');
+      return false;
+    }
+  }
+
   /// Delete Booking from Cloud Firestore
   Future<bool> deleteBooking(int bookingId) async {
     _bookings.removeWhere((b) => b.bookingId == bookingId);

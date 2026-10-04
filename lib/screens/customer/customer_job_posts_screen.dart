@@ -6,6 +6,7 @@ import '../../services/auth_service.dart';
 import '../../services/mysql_service.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/verification_guard.dart';
 import '../chat/conversation_screen.dart';
 
 class CustomerJobPostsScreen extends StatefulWidget {
@@ -30,6 +31,8 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
   }
 
   void _openCreateJobModal() {
+    if (!VerificationGuard.check(context, actionName: 'create a job post')) return;
+
     final titleCtrl = TextEditingController();
     final descCtrl = TextEditingController();
     final budgetCtrl = TextEditingController();
@@ -298,6 +301,7 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
               child: Column(
           children: [
+
             // Post new job button
             Material(
               color: Colors.transparent,
@@ -957,6 +961,7 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) => ConversationScreen(
+                                                otherUserId: bid.workerId,
                                                 otherUserName: workerName,
                                                 serviceTitle: post.title,
                                               ),

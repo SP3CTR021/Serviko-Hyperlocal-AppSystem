@@ -21,6 +21,16 @@ class BookingModel {
   final String? serviceName;
   final String? categoryName;
 
+  final String? paymentMethod;
+  final String? paymentStatus;
+  final DateTime? completedAt;
+  final String? completionNotes;
+  final int? rating;
+  final String? reviewComment;
+  final double? commissionRate;
+  final double? commissionAmount;
+  final double? netAmount;
+
   BookingModel({
     required this.bookingId,
     required this.customerId,
@@ -41,6 +51,15 @@ class BookingModel {
     this.worker,
     this.serviceName,
     this.categoryName,
+    this.paymentMethod,
+    this.paymentStatus,
+    this.completedAt,
+    this.completionNotes,
+    this.rating,
+    this.reviewComment,
+    this.commissionRate,
+    this.commissionAmount,
+    this.netAmount,
   });
 
   bool get isPending => status.toLowerCase() == 'pending';
@@ -77,6 +96,15 @@ class BookingModel {
       worker: worker,
       serviceName: serviceName ?? map['service_name']?.toString(),
       categoryName: categoryName ?? map['category_name']?.toString(),
+      paymentMethod: map['payment_method']?.toString(),
+      paymentStatus: map['payment_status']?.toString(),
+      completedAt: map['completed_at'] != null ? DateTime.tryParse(map['completed_at'].toString()) : null,
+      completionNotes: map['completion_notes']?.toString(),
+      rating: map['rating'] is int ? map['rating'] : int.tryParse(map['rating']?.toString() ?? ''),
+      reviewComment: map['review_comment']?.toString(),
+      commissionRate: map['commission_rate'] != null ? double.tryParse(map['commission_rate'].toString()) : null,
+      commissionAmount: map['commission_amount'] != null ? double.tryParse(map['commission_amount'].toString()) : null,
+      netAmount: map['net_amount'] != null ? double.tryParse(map['net_amount'].toString()) : null,
     );
   }
 
@@ -96,6 +124,15 @@ class BookingModel {
       'cancellation_reason': cancellationReason,
       'cancelled_by': cancelledBy,
       'total_amount': totalAmount,
+      'payment_method': paymentMethod,
+      'payment_status': paymentStatus,
+      'completed_at': completedAt?.toIso8601String(),
+      'completion_notes': completionNotes,
+      'rating': rating,
+      'review_comment': reviewComment,
+      'commission_rate': commissionRate,
+      'commission_amount': commissionAmount,
+      'net_amount': netAmount,
     };
   }
 }

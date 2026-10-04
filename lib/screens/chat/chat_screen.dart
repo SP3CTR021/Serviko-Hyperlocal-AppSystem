@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import '../../models/booking_model.dart';
+import '../../models/message_model.dart';
+import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
+import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import 'conversation_screen.dart';
 
@@ -17,63 +22,36 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // ---------------------------------------------------------------------------
-  // SAMPLE CHAT THREADS (COMMENTED OUT FOR CLEAN SLATE TESTING)
-  // ---------------------------------------------------------------------------
-  // static final List<Map<String, dynamic>> _sampleThreads = [
-  //   {
-  //     'n': 'Nena Santos',
-  //     'i': 'NS',
-  //     'c': const Color(0xFF10794A),
-  //     't': '10:24 AM',
-  //     'p': 'Sure! I will arrive at 9:00 AM tomorrow.',
-  //     'b': 2,
-  //     's': 'House Cleaner · Available now',
-  //   },
-  //   {
-  //     'n': 'Toto Recio',
-  //     'i': 'TR',
-  //     'c': const Color(0xFFB85C00),
-  //     't': 'Yesterday',
-  //     'p': 'All set! Confirmed for July 14.',
-  //     'b': 1,
-  //     's': 'Aircon Tech · Available',
-  //   },
-  //   {
-  //     'n': 'Eddie Morales',
-  //     'i': 'EM',
-  //     'c': const Color(0xFF6B4BD8),
-  //     't': 'Monday',
-  //     'p': 'What is your budget for this pipe repair?',
-  //     'b': 0,
-  //     's': 'Plumber · Davao City',
-  //   },
-  //   {
-  //     'n': 'Romy dela Cruz',
-  //     'i': 'RD',
-  //     'c': const Color(0xFF1B9457),
-  //     't': 'Jul 2',
-  //     'p': 'Thank you for trusting my service!',
-  //     'b': 0,
-  //     's': 'Electrician · Toril',
-  //   },
-  // ];
-  final List<Map<String, dynamic>> _threads = [];
-
   @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  String _formatTimestamp(DateTime? dt) {
+    if (dt == null) return '';
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0 && dt.day == now.day) {
+      final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+      final minute = dt.minute.toString().padLeft(2, '0');
+      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$minute $ampm';
+    } else if (diff.inDays < 2 && dt.day == now.day - 1) {
+      return 'Yesterday';
+    } else if (diff.inDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[dt.weekday - 1];
+    } else {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[dt.month - 1]} ${dt.day}';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final query = _searchCtrl.text.trim().toLowerCase();
-    final list = _threads.where((t) {
-      if (query.isEmpty) return true;
-      return (t['n'] as String).toLowerCase().contains(query) ||
-          (t['p'] as String).toLowerCase().contains(query);
-    }).toList();
+    final currentUser = AuthService().currentUser;
+    final currentUserId = currentUser?.id ?? 0;
 
     return Scaffold(
       backgroundColor: AppTheme.sbSurface,
@@ -92,12 +70,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.sbInk),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Message notifications')),
-              );
-            },
+            icon: const Icon(Icons.refresh_rounded, color: AppTheme.sbInk),
+            tooltip: 'Refresh conversations',
+            onPressed: () => MySqlService().refreshData(),
           ),
           if (widget.onOpenDrawer != null)
             GestureDetector(
@@ -153,133 +128,322 @@ class _ChatListScreenState extends State<ChatListScreen> {
             ),
           ),
 
-          // Message list
+          // Message list builder
           Expanded(
-            child: list.isEmpty
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.chat_bubble_outline_rounded, size: 48, color: AppTheme.sbInk4),
-                          SizedBox(height: 12),
-                          Text('No conversations yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.sbInk)),
-                          SizedBox(height: 6),
-                          Text(
-                            'When you chat with a client or worker, messages will appear here.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 13, color: AppTheme.sbInk4, height: 1.4),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-              itemCount: list.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: AppTheme.sbLine2),
-              itemBuilder: (context, idx) {
-                final item = list[idx];
-                final hasUnread = (item['b'] as int) > 0;
+            child: ListenableBuilder(
+              listenable: MySqlService(),
+              builder: (context, _) {
+                return StreamBuilder<List<MessageModel>>(
+                  stream: FirestoreService().getAllMessagesStream(),
+                  builder: (context, snapshot) {
+                    final allMessages = snapshot.data ?? MySqlService().messages;
+                    final allBookings = MySqlService().bookings;
+                    final allWorkers = MySqlService().workerProfiles;
 
-                return InkWell(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ConversationScreen(
-                          otherUserName: item['n'] as String,
-                          serviceTitle: item['s'] as String,
-                        ),
-                      ),
+                    final Map<int, Map<String, dynamic>> threadMap = {};
+
+                    // 1. Add active/past bookings involving the logged-in user
+                    for (final b in allBookings) {
+                      final isCustomer = (b.customerId == currentUserId);
+                      final isWorker = (b.workerId == currentUserId);
+                      if (!isCustomer && !isWorker) continue;
+
+                      final otherId = isCustomer ? b.workerId : b.customerId;
+                      if (otherId == 0 || otherId == currentUserId) continue;
+
+                      final otherUser = isCustomer ? b.worker : b.customer;
+                      String otherName = otherUser?.fullName.isNotEmpty == true
+                          ? otherUser!.fullName
+                          : (otherUser?.name.isNotEmpty == true ? otherUser!.name : '');
+
+                      if (otherName.isEmpty && isCustomer) {
+                        final wp = allWorkers.where((w) => w.userId == otherId).firstOrNull;
+                        if (wp?.user != null) {
+                          otherName = wp!.user!.fullName.isNotEmpty ? wp.user!.fullName : wp.user!.name;
+                        }
+                      }
+
+                      if (otherName.isEmpty) {
+                        otherName = isCustomer ? 'Worker #$otherId' : 'Client #$otherId';
+                      }
+
+                      final serviceTitle = b.serviceName ?? b.categoryName ?? 'Service Booking';
+                      final date = b.createdAt ?? DateTime(2000);
+
+                      threadMap[otherId] = {
+                        'id': otherId,
+                        'n': otherName,
+                        's': serviceTitle,
+                        'p': 'Booking #${b.bookingId} (${b.status.toUpperCase()})',
+                        't': _formatTimestamp(date),
+                        'b': 0,
+                        'latestDate': date,
+                        'booking': b,
+                      };
+                    }
+
+                    // 2. Add or update threads from messages
+                    for (final m in allMessages) {
+                      final isSender = (m.senderId == currentUserId);
+                      final isReceiver = (m.receiverId == currentUserId);
+                      if (!isSender && !isReceiver) continue;
+
+                      final otherId = isSender ? m.receiverId : m.senderId;
+                      if (otherId == 0 || otherId == currentUserId) continue;
+
+                      final otherUser = isSender ? m.receiver : m.sender;
+                      final msgDate = m.sentAt ?? DateTime(2000);
+
+                      if (!threadMap.containsKey(otherId)) {
+                        String? resolvedName;
+                        if (otherUser != null) {
+                          resolvedName = otherUser.fullName.isNotEmpty ? otherUser.fullName : otherUser.name;
+                        }
+                        if (resolvedName == null || resolvedName.isEmpty) {
+                          final wp = allWorkers.where((w) => w.userId == otherId).firstOrNull;
+                          if (wp?.user != null) {
+                            resolvedName = wp!.user!.fullName.isNotEmpty ? wp.user!.fullName : wp.user!.name;
+                          }
+                        }
+
+                        threadMap[otherId] = {
+                          'id': otherId,
+                          'n': resolvedName?.isNotEmpty == true ? resolvedName! : 'User #$otherId',
+                          's': 'Direct Chat',
+                          'p': m.content ?? '',
+                          't': _formatTimestamp(msgDate),
+                          'b': 0,
+                          'latestDate': msgDate,
+                          'booking': null,
+                        };
+                      } else {
+                        final existingDate = threadMap[otherId]!['latestDate'] as DateTime;
+                        if (msgDate.isAfter(existingDate) || msgDate.isAtSameMomentAs(existingDate)) {
+                          threadMap[otherId]!['p'] = m.content ?? '';
+                          threadMap[otherId]!['t'] = _formatTimestamp(msgDate);
+                          threadMap[otherId]!['latestDate'] = msgDate;
+                        }
+
+                        if (otherUser != null && (otherUser.fullName.isNotEmpty || otherUser.name.isNotEmpty)) {
+                          final currentName = threadMap[otherId]!['n'] as String;
+                          if (currentName.startsWith('User #') ||
+                              currentName.startsWith('Worker #') ||
+                              currentName.startsWith('Client #')) {
+                            threadMap[otherId]!['n'] = otherUser.fullName.isNotEmpty
+                                ? otherUser.fullName
+                                : otherUser.name;
+                          }
+                        }
+                      }
+
+                      if (isReceiver && !m.isRead) {
+                        threadMap[otherId]!['b'] = (threadMap[otherId]!['b'] as int) + 1;
+                      }
+                    }
+
+                    // 3. Post-processing threads: sort & compute initials/colors
+                    final allThreads = threadMap.values.toList();
+                    allThreads.sort((a, b) =>
+                        (b['latestDate'] as DateTime).compareTo(a['latestDate'] as DateTime));
+
+                    for (final t in allThreads) {
+                      final name = (t['n'] as String).trim();
+                      final parts = name.split(' ');
+                      String initials = '';
+                      if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+                        initials = '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+                      } else if (name.isNotEmpty) {
+                        initials = name.substring(0, 1).toUpperCase();
+                      } else {
+                        initials = 'U';
+                      }
+                      t['i'] = initials;
+
+                      final id = t['id'] as int;
+                      const colors = [
+                        Color(0xFF10794A),
+                        Color(0xFF0284C7),
+                        Color(0xFF6B4BD8),
+                        Color(0xFFB85C00),
+                        Color(0xFFE11D48),
+                        Color(0xFF0D9488),
+                      ];
+                      t['c'] = colors[id.abs() % colors.length];
+                    }
+
+                    // 4. Search filtering
+                    final query = _searchCtrl.text.trim().toLowerCase();
+                    final list = allThreads.where((t) {
+                      if (query.isEmpty) return true;
+                      final name = (t['n'] as String).toLowerCase();
+                      final preview = (t['p'] as String).toLowerCase();
+                      final service = ((t['s'] as String?) ?? '').toLowerCase();
+                      return name.contains(query) || preview.contains(query) || service.contains(query);
+                    }).toList();
+
+                    return RefreshIndicator(
+                      onRefresh: () => MySqlService().refreshData(),
+                      child: list.isEmpty
+                          ? ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: const [
+                                SizedBox(height: 120),
+                                Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(40),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.chat_bubble_outline_rounded,
+                                            size: 48, color: AppTheme.sbInk4),
+                                        SizedBox(height: 12),
+                                        Text('No conversations yet',
+                                            style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppTheme.sbInk)),
+                                        SizedBox(height: 6),
+                                        Text(
+                                          'When you chat with a client or worker, messages will appear here in real-time.',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              color: AppTheme.sbInk4,
+                                              height: 1.4),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              itemCount: list.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1, color: AppTheme.sbLine2),
+                              itemBuilder: (context, idx) {
+                                final item = list[idx];
+                                final hasUnread = (item['b'] as int) > 0;
+
+                                return InkWell(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ConversationScreen(
+                                          otherUserId: item['id'] as int,
+                                          otherUserName: item['n'] as String,
+                                          serviceTitle: item['s'] as String?,
+                                          booking: item['booking'] as BookingModel?,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 18, vertical: 14),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 50,
+                                          height: 50,
+                                          decoration: BoxDecoration(
+                                            color: item['c'] as Color,
+                                            borderRadius: BorderRadius.circular(16),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              item['i'] as String,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 13),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      item['n'] as String,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        fontSize: 14.5,
+                                                        fontWeight: FontWeight.w800,
+                                                        color: AppTheme.sbInk,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    item['t'] as String,
+                                                    style: const TextStyle(
+                                                      fontSize: 11.5,
+                                                      color: AppTheme.sbInk4,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                item['p'] as String,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: hasUnread
+                                                      ? FontWeight.w700
+                                                      : FontWeight.w500,
+                                                  color: hasUnread
+                                                      ? AppTheme.sbInk
+                                                      : AppTheme.sbInk3,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (hasUnread) ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            width: 22,
+                                            height: 22,
+                                            decoration: const BoxDecoration(
+                                              gradient: AppTheme.gBlue,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                '${item['b']}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                     );
                   },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 50,
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color: item['c'] as Color,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Center(
-                            child: Text(
-                              item['i'] as String,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 13),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    item['n'] as String,
-                                    style: const TextStyle(
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.sbInk,
-                                    ),
-                                  ),
-                                  Text(
-                                    item['t'] as String,
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      color: AppTheme.sbInk4,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                item['p'] as String,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
-                                  color: hasUnread ? AppTheme.sbInk : AppTheme.sbInk3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (hasUnread) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            width: 22,
-                            height: 22,
-                            decoration: const BoxDecoration(
-                              gradient: AppTheme.gBlue,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${item['b']}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
                 );
               },
             ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import '../chat/conversation_screen.dart';
+import '../../widgets/booking_completion_modal.dart';
 
 class WorkerBookingsScreen extends StatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -210,8 +211,10 @@ class _WorkerBookingsScreenState extends State<WorkerBookingsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => ConversationScreen(
+                          otherUserId: b.customerId,
                           otherUserName: customerName,
                           serviceTitle: serviceTitle,
+                          booking: b,
                         ),
                       ),
                     );
@@ -284,8 +287,10 @@ class _WorkerBookingsScreenState extends State<WorkerBookingsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => ConversationScreen(
+                          otherUserId: b.customerId,
                           otherUserName: customerName,
                           serviceTitle: serviceTitle,
+                          booking: b,
                         ),
                       ),
                     );
@@ -301,19 +306,26 @@ class _WorkerBookingsScreenState extends State<WorkerBookingsScreen> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: ElevatedButton(
-                  onPressed: () async {
-                    await MySqlService().updateBookingStatus(b.bookingId, 'completed');
-                    if (mounted) setState(() {});
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                  label: const Text('Mark as Done', style: TextStyle(fontWeight: FontWeight.w800)),
+                  onPressed: () {
+                    showBookingCompletionModal(
+                      context: context,
+                      booking: b,
+                      isCustomer: false,
+                      onCompleted: () {
+                        if (mounted) setState(() {});
+                      },
+                    );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.sbBlue,
+                    backgroundColor: AppTheme.sbGreen,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                  child: const Text('Mark as Done', style: TextStyle(fontWeight: FontWeight.w800)),
                 ),
               ),
             ],
@@ -346,10 +358,34 @@ class _WorkerBookingsScreenState extends State<WorkerBookingsScreen> {
             amount: '₱${(b.totalAmount ?? 0).toInt()}',
             kv: {
               'Service': serviceTitle,
-              'Date': b.scheduledDate != null ? '${b.scheduledDate!.month}/${b.scheduledDate!.day}/${b.scheduledDate!.year}' : 'Recent',
+              'Settlement': '${b.paymentMethod ?? 'Cash'} • ${(b.paymentStatus?.toUpperCase() ?? 'PAID')}',
+              if (b.rating != null && b.rating! > 0)
+                'Rating Received': '${'★' * b.rating!} (${b.rating}/5)'
+              else
+                'Date': b.scheduledDate != null ? '${b.scheduledDate!.month}/${b.scheduledDate!.day}/${b.scheduledDate!.year}' : 'Recent',
               'Location': b.serviceAddress ?? 'Local Area',
             },
-            actions: const [],
+            actions: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.receipt_long_rounded, size: 16),
+                  label: const Text('View Receipt', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onPressed: () {
+                    showBookingReceiptDialog(
+                      context: context,
+                      booking: b,
+                      isCustomer: false,
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.sbInk2,
+                    side: const BorderSide(color: AppTheme.sbLine, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       }).toList(),

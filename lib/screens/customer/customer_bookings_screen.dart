@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import '../chat/conversation_screen.dart';
+import '../../widgets/booking_completion_modal.dart';
 
 class CustomerBookingsScreen extends StatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -196,8 +197,10 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => ConversationScreen(
+                          otherUserId: b.workerId,
                           otherUserName: workerName,
                           serviceTitle: workerSkill,
+                          booking: b,
                         ),
                       ),
                     );
@@ -213,19 +216,26 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: ElevatedButton(
-                  onPressed: () async {
-                    await MySqlService().updateBookingStatus(b.bookingId, 'completed');
-                    if (mounted) setState(() {});
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                  label: const Text('Mark Done', style: TextStyle(fontWeight: FontWeight.w800)),
+                  onPressed: () {
+                    showBookingCompletionModal(
+                      context: context,
+                      booking: b,
+                      isCustomer: true,
+                      onCompleted: () {
+                        if (mounted) setState(() {});
+                      },
+                    );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.sbBlue,
+                    backgroundColor: AppTheme.sbGreen,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                  child: const Text('Mark Done', style: TextStyle(fontWeight: FontWeight.w800)),
                 ),
               ),
             ],
@@ -306,10 +316,34 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
             amount: '₱${(b.totalAmount ?? 0).toInt()}',
             kv: {
               'Service': workerSkill,
-              'Time': b.scheduledTime ?? 'Morning',
+              'Settlement': '${b.paymentMethod ?? 'Cash'} • ${(b.paymentStatus?.toUpperCase() ?? 'PAID')}',
+              if (b.rating != null && b.rating! > 0)
+                'Rating': '${'★' * b.rating!} (${b.rating}/5)'
+              else
+                'Time': b.scheduledTime ?? 'Morning',
               'Location': b.serviceAddress ?? 'Local Area',
             },
             actions: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.receipt_long_rounded, size: 16),
+                  label: const Text('Receipt', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onPressed: () {
+                    showBookingReceiptDialog(
+                      context: context,
+                      booking: b,
+                      isCustomer: true,
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.sbInk2,
+                    side: const BorderSide(color: AppTheme.sbLine, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: ElevatedButton(
                   onPressed: () {
@@ -318,8 +352,8 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
                     );
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.sbBlueSoft,
-                    foregroundColor: AppTheme.sbBlue,
+                    backgroundColor: AppTheme.sbBlue,
+                    foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 10),

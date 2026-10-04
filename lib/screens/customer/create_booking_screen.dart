@@ -5,6 +5,7 @@ import '../../models/booking_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/verification_guard.dart';
 
 class CreateBookingScreen extends StatefulWidget {
   final WorkerProfileModel worker;
@@ -60,6 +61,7 @@ class _CreateBookingScreenState extends State<CreateBookingScreen> {
   }
 
   Future<void> _handleSubmitBooking() async {
+    if (!VerificationGuard.check(context, actionName: 'book a service')) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
