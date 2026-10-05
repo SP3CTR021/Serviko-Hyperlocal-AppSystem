@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../models/booking_model.dart';
+import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
+import '../../services/location_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_completion_banner.dart';
@@ -29,29 +31,25 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
   bool _filterAvailableOnly = false;
   bool _filterVerifiedOnly = false;
   bool _filterTopRatedOnly = false;
-  String _sortBy = 'Most Relevant';
+  String _sortBy = 'Closest Distance';
+
+  // Client location & Proximity Radius filter (Default: Davao City & All Davao workers included)
+  String _clientLocation = 'Davao City';
+  double? _maxRadiusKm;
 
   // ---------------------------------------------------------------------------
   // SAMPLE PEOPLE / WORKERS (COMMENTED OUT FOR CLEAN SLATE TESTING)
   // ---------------------------------------------------------------------------
-  // static final List<Map<String, dynamic>> _sampleProtoWorkers = [
-  //   {'n': 'Romy dela Cruz', 'i': 'RD', 'c': const Color(0xFF1B9457), 's': 'Electrician', 'l': 'Toril, Davao City', 'r': 4.9, 'j': 87, 'p': 350, 'u': 'hr', 'v': true, 'a': true, 't': true},
-  //   {'n': 'Nena Santos', 'i': 'NS', 'c': const Color(0xFF10794A), 's': 'House Cleaner', 'l': 'Matina, Davao City', 'r': 4.8, 'j': 134, 'p': 250, 'u': 'hr', 'v': true, 'a': true, 't': true},
-  //   {'n': 'Eddie Morales', 'i': 'EM', 'c': const Color(0xFF6B4BD8), 's': 'Plumber', 'l': 'Agdao, Davao City', 'r': 4.7, 'j': 62, 'p': 400, 'u': 'hr', 'v': true, 'a': false, 't': false},
-  //   {'n': 'Ben Villarreal', 'i': 'BV', 'c': const Color(0xFFC47D0E), 's': 'Carpenter', 'l': 'Buhangin, Davao City', 'r': 4.6, 'j': 45, 'p': 550, 'u': 'day', 'v': false, 'a': true, 't': false},
-  //   {'n': 'Toto Recio', 'i': 'TR', 'c': const Color(0xFFB85C00), 's': 'Aircon Tech', 'l': 'Lanang, Davao City', 'r': 4.9, 'j': 203, 'p': 300, 'u': 'unit', 'v': true, 'a': true, 't': true},
-  //   {'n': 'Linda Go', 'i': 'LG', 'c': const Color(0xFFA32D2D), 's': 'Painter', 'l': 'Talomo, Davao City', 'r': 4.5, 'j': 38, 'p': 600, 'u': 'day', 'v': false, 'a': true, 't': false},
-  //   {'n': 'Dodong Espinosa', 'i': 'DE', 'c': const Color(0xFF0F6E56), 's': 'Welder', 'l': 'Mintal, Davao City', 'r': 4.8, 'j': 71, 'p': 500, 'u': 'hr', 'v': true, 'a': false, 't': true},
-  //   {'n': 'Clara Santos', 'i': 'CS', 'c': const Color(0xFF533AB7), 's': 'Massage Therapist', 'l': 'Ma-a, Davao City', 'r': 4.7, 'j': 156, 'p': 200, 'u': 'session', 'v': true, 'a': true, 't': false},
-  //   {'n': 'Kuya Boy', 'i': 'KB', 'c': const Color(0xFF854F0B), 's': 'Handyman', 'l': 'Sasa, Davao City', 'r': 4.7, 'j': 93, 'p': 300, 'u': 'hr', 'v': true, 'a': true, 't': false},
-  //   {'n': 'Bert Reyes', 'i': 'BR', 'c': const Color(0xFF0C447C), 's': 'Electrician', 'l': 'Sta. Ana, Davao City', 'r': 4.8, 'j': 118, 'p': 380, 'u': 'hr', 'v': true, 'a': true, 't': true},
-  // ];
   final List<Map<String, dynamic>> _protoWorkers = [];
 
   @override
   void initState() {
     super.initState();
     MySqlService().refreshData();
+    final userLoc = AuthService().currentUser?.locationString;
+    if (userLoc != null && userLoc.trim().isNotEmpty) {
+      _clientLocation = userLoc.trim();
+    }
   }
 
   @override
@@ -63,18 +61,27 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
   List<Map<String, dynamic>> _getFilteredWorkers() {
     final query = _searchController.text.trim().toLowerCase();
 
+    // Resolve client coordinate (defaults to Maa, Davao City)
+    final clientCoord = LocationService().resolveLocationSync(_clientLocation);
+
     // Map dynamic database worker profiles from MySqlService / Firestore
     final dbWorkers = MySqlService().workerProfiles.map((wp) {
       final name = wp.user?.fullName ?? (wp.user?.name ?? 'Worker');
       final colorHex = wp.avatarColor?.replaceFirst('#', '0xFF') ?? '0xFF1B9457';
       final parsedColor = Color(int.tryParse(colorHex) ?? 0xFF1B9457);
+      final photoUrl = wp.photoUrl;
       return {
         'id': wp.userId,
+        'user_id': wp.userId,
+        'worker': wp.user,
+        'photo': photoUrl,
         'n': name,
         'i': wp.initials ?? (name.isNotEmpty ? name[0] : 'W'),
         'c': parsedColor,
         's': wp.primarySkill ?? 'Services',
-        'l': wp.user?.locationString ?? 'Local Area',
+        'l': (wp.user?.locationString != null && wp.user!.locationString != 'Location not set')
+            ? wp.user!.locationString
+            : (wp.user?.city ?? 'Davao City'),
         'r': wp.avgRating,
         'j': wp.totalJobsCompleted,
         'p': wp.basePrice?.toInt() ?? 300,
@@ -91,6 +98,22 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
       final name = (w['n'] as String).toLowerCase();
       final skill = (w['s'] as String).toLowerCase();
       final loc = (w['l'] as String).toLowerCase();
+
+      // Proximity distance calculation via LocationService (Haversine formula for sorting & badge display)
+      final workerCoord = LocationService().resolveLocationSync(w['l'] as String? ?? 'Davao City');
+      final distKm = LocationService().calculateDistanceKm(
+        clientCoord.latitude,
+        clientCoord.longitude,
+        workerCoord.latitude,
+        workerCoord.longitude,
+      );
+      w['d'] = distKm;
+
+      // Automatically include any worker from Davao City without barangay filtering
+      final isDavaoWorker = loc.contains('davao') || loc.isEmpty || loc == 'location not set';
+      if (!isDavaoWorker && _maxRadiusKm != null && distKm > _maxRadiusKm!) {
+        return false;
+      }
 
       if (query.isNotEmpty && !name.contains(query) && !skill.contains(query) && !loc.contains(query)) {
         return false;
@@ -117,7 +140,9 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
       return true;
     }).toList();
 
-    if (_sortBy == 'Highest Rated') {
+    if (_sortBy == 'Closest Distance') {
+      list.sort((a, b) => ((a['d'] as double?) ?? 0.0).compareTo((b['d'] as double?) ?? 0.0));
+    } else if (_sortBy == 'Highest Rated') {
       list.sort((a, b) => (b['r'] as double).compareTo(a['r'] as double));
     } else if (_sortBy == 'Lowest Price') {
       list.sort((a, b) => (a['p'] as int).compareTo(b['p'] as int));
@@ -132,7 +157,7 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
     final today = DateTime.now();
     final dateStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     String selectedTime = '9:00 AM';
-    final addressCtrl = TextEditingController(text: 'Matina, Davao City');
+    final addressCtrl = TextEditingController(text: _clientLocation);
     final detailsCtrl = TextEditingController();
 
     showModalBottomSheet(
@@ -313,10 +338,32 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                   final currentUser = AuthService().currentUser;
                   final price = (worker['p'] as num?)?.toDouble() ?? 500.0;
 
+                  // Worker ID and Worker model resolution
+                  int targetWorkerId = 0;
+                  if (worker['id'] is int && (worker['id'] as int) > 0) {
+                    targetWorkerId = worker['id'] as int;
+                  } else if (worker['user_id'] is int && (worker['user_id'] as int) > 0) {
+                    targetWorkerId = worker['user_id'] as int;
+                  } else if (int.tryParse(worker['id']?.toString() ?? '') != null) {
+                    targetWorkerId = int.parse(worker['id'].toString());
+                  }
+
+                  UserModel? targetWorker = worker['worker'] is UserModel ? worker['worker'] as UserModel : null;
+                  if (targetWorker == null && targetWorkerId > 0) {
+                    try {
+                      final wp = MySqlService().workerProfiles.firstWhere(
+                        (w) => w.userId == targetWorkerId || w.workerProfileId == targetWorkerId,
+                      );
+                      targetWorker = wp.user;
+                    } catch (_) {}
+                  }
+
                   final newBooking = BookingModel(
                     bookingId: DateTime.now().millisecondsSinceEpoch % 100000,
-                    customerId: currentUser?.id ?? 1,
-                    workerId: (worker['user_id'] is int) ? worker['user_id'] : 2,
+                    customerId: currentUser?.id ?? 0,
+                    customerUid: currentUser?.uid,
+                    workerId: targetWorkerId,
+                    workerUid: targetWorker?.uid,
                     scheduledDate: DateTime.now().add(const Duration(days: 1)),
                     scheduledTime: selectedTime,
                     serviceAddress: address.isNotEmpty ? address : 'Local Address',
@@ -325,6 +372,7 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                     totalAmount: price,
                     createdAt: DateTime.now(),
                     customer: currentUser,
+                    worker: targetWorker,
                     serviceName: worker['s']?.toString() ?? 'Service',
                   );
 
@@ -414,6 +462,36 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                     onChanged: (val) {
                       setSheetState(() => _locationFilter = val ?? '');
                       setState(() => _locationFilter = val ?? '');
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // Radius Dropdown
+              const Text('Proximity Radius', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.sbInk2)),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: AppTheme.sbCard,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.sbLine, width: 1.5),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<double?>(
+                    value: _maxRadiusKm,
+                    isExpanded: true,
+                    items: const [
+                      DropdownMenuItem(value: 5.0, child: Text('Within 5 km')),
+                      DropdownMenuItem(value: 10.0, child: Text('Within 10 km')),
+                      DropdownMenuItem(value: 15.0, child: Text('Within 15 km (Recommended)')),
+                      DropdownMenuItem(value: 25.0, child: Text('Within 25 km')),
+                      DropdownMenuItem(value: null, child: Text('All distances (No radius limit)')),
+                    ],
+                    onChanged: (val) {
+                      setSheetState(() => _maxRadiusKm = val);
+                      setState(() => _maxRadiusKm = val);
                     },
                   ),
                 ),
@@ -528,7 +606,7 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
             const SizedBox(height: 14),
             const Text('Sort Results By', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.sbInk)),
             const SizedBox(height: 14),
-            ...['Most Relevant', 'Highest Rated', 'Lowest Price', 'Closest Distance'].map(
+            ...['Closest Distance', 'Highest Rated', 'Lowest Price', 'Most Relevant'].map(
               (opt) => ListTile(
                 title: Text(
                   opt,
@@ -575,6 +653,224 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
     );
   }
 
+  Widget _buildRadiusChip({
+    required String label,
+    required double? radiusVal,
+    required double? currentRadius,
+    required VoidCallback onTap,
+  }) {
+    final isSelected = radiusVal == currentRadius;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.sbBlueSoft : AppTheme.sbSurface,
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(
+            color: isSelected ? AppTheme.sbBlue : AppTheme.sbLine,
+            width: 1.2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: isSelected ? AppTheme.sbBlue : AppTheme.sbInk2,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openLocationRadiusSheet() {
+    final customCtrl = TextEditingController();
+    bool isSearching = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Container(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            14,
+            20,
+            MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          decoration: const BoxDecoration(
+            color: AppTheme.sbCard,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(28),
+              topRight: Radius.circular(28),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(color: AppTheme.sbLine, borderRadius: BorderRadius.circular(99)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Location & Proximity Radius',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.sbInk),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Serviko calculates straight-line GPS distance to verified workers in your area.',
+                style: TextStyle(fontSize: 12.5, color: AppTheme.sbInk4),
+              ),
+              const SizedBox(height: 16),
+
+              // Search radius chips
+              const Text('Search Radius', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.sbInk2)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _buildRadiusChip(label: '5 km', radiusVal: 5.0, currentRadius: _maxRadiusKm, onTap: () {
+                    setSheetState(() => _maxRadiusKm = 5.0);
+                    setState(() => _maxRadiusKm = 5.0);
+                  }),
+                  _buildRadiusChip(label: '10 km', radiusVal: 10.0, currentRadius: _maxRadiusKm, onTap: () {
+                    setSheetState(() => _maxRadiusKm = 10.0);
+                    setState(() => _maxRadiusKm = 10.0);
+                  }),
+                  _buildRadiusChip(label: '15 km (Recommended)', radiusVal: 15.0, currentRadius: _maxRadiusKm, onTap: () {
+                    setSheetState(() => _maxRadiusKm = 15.0);
+                    setState(() => _maxRadiusKm = 15.0);
+                  }),
+                  _buildRadiusChip(label: '25 km', radiusVal: 25.0, currentRadius: _maxRadiusKm, onTap: () {
+                    setSheetState(() => _maxRadiusKm = 25.0);
+                    setState(() => _maxRadiusKm = 25.0);
+                  }),
+                  _buildRadiusChip(label: 'All Distances', radiusVal: null, currentRadius: _maxRadiusKm, onTap: () {
+                    setSheetState(() => _maxRadiusKm = null);
+                    setState(() => _maxRadiusKm = null);
+                  }),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Davao City Barangays chips
+              const Text('Select Barangay / Location', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.sbInk2)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  'Maa, Davao City',
+                  'Matina, Davao City',
+                  'Toril, Davao City',
+                  'Buhangin, Davao City',
+                  'Lanang, Davao City',
+                  'Agdao, Davao City',
+                  'Poblacion, Davao City',
+                ].map((loc) {
+                  final isSelected = _clientLocation.toLowerCase().contains(loc.split(',')[0].toLowerCase());
+                  return GestureDetector(
+                    onTap: () {
+                      setSheetState(() => _clientLocation = loc);
+                      setState(() => _clientLocation = loc);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppTheme.sbGreenSoft : AppTheme.sbSurface,
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(
+                          color: isSelected ? AppTheme.sbGreen : AppTheme.sbLine,
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Text(
+                        loc.split(',')[0],
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: isSelected ? AppTheme.sbGreen : AppTheme.sbInk2,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 14),
+
+              // OpenStreetMap API Search Field
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: customCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'Or enter custom Philippine address',
+                        hintStyle: const TextStyle(fontSize: 12.5, color: AppTheme.sbInk4),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        filled: true,
+                        fillColor: AppTheme.sbSurface,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.sbLine)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.sbLine)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: isSearching
+                        ? null
+                        : () async {
+                            final text = customCtrl.text.trim();
+                            if (text.isEmpty) return;
+                            setSheetState(() => isSearching = true);
+                            await LocationService().resolveLocation(text);
+                            setSheetState(() {
+                              isSearching = false;
+                              _clientLocation = text;
+                            });
+                            setState(() => _clientLocation = text);
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.sbBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    child: isSearching
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('API Search', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.sbBlue,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 0,
+                ),
+                child: const Text('Apply Changes', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -588,10 +884,24 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
             ? userName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join().toUpperCase()
             : 'U';
 
-        final bookings = MySqlService().bookings;
-        final activeBookingsCount = bookings.where((b) => b.status == 'accepted' || b.status == 'in_progress' || b.status == 'pending').length;
-        final totalBookingsCount = bookings.length;
-        final totalSpent = bookings.fold<double>(0.0, (acc, b) => acc + (b.totalAmount ?? 0.0));
+        final currentUserId = currentUser?.id;
+        final currentUserUid = currentUser?.uid;
+        final currentUserEmail = currentUser?.email.toLowerCase().trim();
+
+        final myCustomerBookings = MySqlService().bookings.where((b) {
+          if (currentUser == null) return false;
+          if (currentUserId != null && currentUserId != 0 && b.customerId == currentUserId) return true;
+          if (b.customer != null) {
+            if (currentUserId != null && currentUserId != 0 && b.customer!.id == currentUserId) return true;
+            if (currentUserUid != null && currentUserUid.isNotEmpty && b.customer!.uid == currentUserUid) return true;
+            if (currentUserEmail != null && currentUserEmail.isNotEmpty && b.customer!.email.toLowerCase().trim() == currentUserEmail) return true;
+          }
+          return false;
+        }).toList();
+
+        final activeBookingsCount = myCustomerBookings.where((b) => b.status == 'accepted' || b.status == 'in_progress' || b.status == 'pending').length;
+        final totalBookingsCount = myCustomerBookings.length;
+        final totalSpent = myCustomerBookings.where((b) => b.status == 'completed').fold<double>(0.0, (acc, b) => acc + (b.totalAmount ?? 0.0));
 
         return Scaffold(
           backgroundColor: AppTheme.sbSurface,
@@ -947,28 +1257,167 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
             ),
             const SizedBox(height: 16),
 
+            // Proximity & Client Location Bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.sbCard,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.sbLine),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x080B1B33),
+                      blurRadius: 8,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.sbGreenSoft,
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: const Icon(Icons.location_on_rounded, color: AppTheme.sbGreen, size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  _clientLocation,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.sbInk,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.sbGreenSoft,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'Client Area',
+                                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: AppTheme.sbGreen),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _maxRadiusKm != null
+                                ? 'Workers within ${_maxRadiusKm!.toInt()}km radius'
+                                : 'All workers (no radius limit)',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.sbInk4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: _openLocationRadiusSheet,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.sbBlueSoft,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.tune_rounded, size: 13, color: AppTheme.sbBlue),
+                            const SizedBox(width: 4),
+                            Text(
+                              _maxRadiusKm != null ? '${_maxRadiusKm!.toInt()} km' : 'All',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.sbBlue,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+
             // Section Header
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '${workers.length} workers near you',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.sbInk,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${workers.length} workers near you',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.sbInk,
+                          ),
+                        ),
+                        if (_maxRadiusKm != null)
+                          Text(
+                            'Within ${_maxRadiusKm!.toInt()}km radius of ${_clientLocation.split(',')[0]}',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.sbInk4,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   GestureDetector(
                     onTap: _openSortSheet,
-                    child: const Text(
-                      'Sort',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.sbBlue,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppTheme.sbSurface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppTheme.sbLine),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.sort_rounded, size: 14, color: AppTheme.sbBlue),
+                          const SizedBox(width: 4),
+                          Text(
+                            _sortBy,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.sbBlue,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -1027,18 +1476,38 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                                     width: 52,
                                     height: 52,
                                     decoration: BoxDecoration(
-                                      color: w['c'] as Color,
+                                      color: w['c'] as Color? ?? AppTheme.sbBlue,
                                       borderRadius: BorderRadius.circular(16),
                                     ),
-                                    child: Center(
-                                      child: Text(
-                                        w['i'] as String,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 16,
-                                        ),
-                                      ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: (w['photo'] != null && (w['photo'] as String).isNotEmpty)
+                                          ? Image.network(
+                                              w['photo'] as String,
+                                              width: 52,
+                                              height: 52,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) => Center(
+                                                child: Text(
+                                                  w['i'] as String? ?? 'W',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w800,
+                                                    fontSize: 16,
+                                                  ),
+                                                ),
+                                              ),
+                                            )
+                                          : Center(
+                                              child: Text(
+                                                w['i'] as String? ?? 'W',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w800,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
+                                            ),
                                     ),
                                   ),
                                   if (w['v'] == true)
@@ -1083,27 +1552,34 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 6),
-                                    Row(
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      crossAxisAlignment: WrapCrossAlignment.center,
                                       children: [
-                                        const Icon(Icons.star_rounded, color: AppTheme.sbAmber, size: 16),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          '${w['r']}',
-                                          style: const TextStyle(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w800,
-                                            color: AppTheme.sbInk,
-                                          ),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.star_rounded, color: AppTheme.sbYellowGreen, size: 16),
+                                            const SizedBox(width: 2),
+                                            Text(
+                                              '${w['r']}',
+                                              style: const TextStyle(
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppTheme.sbInk,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                         Text(
-                                          ' · ${w['j']} jobs',
+                                          '${w['j']} jobs',
                                           style: const TextStyle(
                                             fontSize: 12,
                                             color: AppTheme.sbInk4,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                        const SizedBox(width: 6),
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                           decoration: BoxDecoration(
@@ -1119,11 +1595,35 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                                             ),
                                           ),
                                         ),
+                                        if (w['d'] != null)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.sbBlueSoft,
+                                              borderRadius: BorderRadius.circular(99),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.near_me_rounded, size: 10, color: AppTheme.sbBlue),
+                                                const SizedBox(width: 3),
+                                                Text(
+                                                  '${(w['d'] as double).toStringAsFixed(1)} km',
+                                                  style: const TextStyle(
+                                                    fontSize: 10.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: AppTheme.sbBlue,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ],
                                 ),
                               ),
+                              const SizedBox(width: 8),
 
                               // Price
                               Column(
@@ -1166,6 +1666,7 @@ class _ExploreServicesScreenState extends State<ExploreServicesScreen> {
                                           otherUserId: w['id'] as int?,
                                           otherUserName: w['n'] as String,
                                           serviceTitle: w['s'] as String,
+                                          otherUserPhoto: w['photo'] as String?,
                                         ),
                                       ),
                                     );

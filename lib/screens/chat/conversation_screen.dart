@@ -13,6 +13,7 @@ class ConversationScreen extends StatefulWidget {
   final String otherUserName;
   final String? serviceTitle;
   final int? otherUserId;
+  final String? otherUserPhoto;
 
   const ConversationScreen({
     super.key,
@@ -20,6 +21,7 @@ class ConversationScreen extends StatefulWidget {
     required this.otherUserName,
     this.serviceTitle,
     this.otherUserId,
+    this.otherUserPhoto,
   });
 
   @override
@@ -37,6 +39,51 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.dispose();
   }
 
+  String? _resolveOtherPhoto(int otherId) {
+    if (widget.otherUserPhoto != null && widget.otherUserPhoto!.isNotEmpty) {
+      return widget.otherUserPhoto;
+    }
+    if (widget.booking != null) {
+      final currentUserId = AuthService().currentUser?.id ?? 1;
+      final otherUser = currentUserId == widget.booking!.customerId
+          ? widget.booking!.worker
+          : widget.booking!.customer;
+      if (otherUser?.profilePhotoUrl != null && otherUser!.profilePhotoUrl!.isNotEmpty) {
+        return otherUser.profilePhotoUrl;
+      }
+    }
+    if (otherId != 0) {
+      final u = MySqlService().users.where((u) => u.id == otherId).firstOrNull;
+      if (u?.profilePhotoUrl != null && u!.profilePhotoUrl!.isNotEmpty) {
+        return u.profilePhotoUrl;
+      }
+      final wp = MySqlService().workerProfiles.where((w) => w.userId == otherId).firstOrNull;
+      if (wp?.photoUrl != null && wp!.photoUrl!.isNotEmpty) return wp.photoUrl;
+      if (wp?.profilePhotoUrl != null && wp!.profilePhotoUrl!.isNotEmpty) return wp.profilePhotoUrl;
+      if (wp?.user?.profilePhotoUrl != null && wp!.user!.profilePhotoUrl!.isNotEmpty) return wp.user!.profilePhotoUrl;
+
+      for (final b in MySqlService().bookings) {
+        if (b.customerId == otherId && b.customer?.profilePhotoUrl != null && b.customer!.profilePhotoUrl!.isNotEmpty) {
+          return b.customer!.profilePhotoUrl;
+        }
+        if (b.workerId == otherId && b.worker?.profilePhotoUrl != null && b.worker!.profilePhotoUrl!.isNotEmpty) {
+          return b.worker!.profilePhotoUrl;
+        }
+      }
+      for (final jp in MySqlService().jobPosts) {
+        if (jp.customerId == otherId && jp.customer?.profilePhotoUrl != null && jp.customer!.profilePhotoUrl!.isNotEmpty) {
+          return jp.customer!.profilePhotoUrl;
+        }
+        for (final bid in jp.bids) {
+          if (bid.workerId == otherId && bid.worker?.profilePhotoUrl != null && bid.worker!.profilePhotoUrl!.isNotEmpty) {
+            return bid.worker!.profilePhotoUrl;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   void _handleSendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
@@ -49,6 +96,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         (widget.booking != null
             ? (currentUserId == widget.booking!.customerId ? widget.booking!.workerId : widget.booking!.customerId)
             : 0);
+    final resolvedOtherPhoto = _resolveOtherPhoto(otherUserId);
 
     UserModel? receiverUser;
     if (widget.booking != null) {
@@ -63,7 +111,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
         fullName: widget.otherUserName,
         email: '',
         role: 'user',
+        profilePhotoUrl: resolvedOtherPhoto,
       );
+    } else if (receiverUser != null && (receiverUser.profilePhotoUrl == null || receiverUser.profilePhotoUrl!.isEmpty)) {
+      if (resolvedOtherPhoto != null && resolvedOtherPhoto.isNotEmpty) {
+        receiverUser = receiverUser.copyWith(profilePhotoUrl: resolvedOtherPhoto);
+      }
     }
 
     final newMsg = MessageModel(
@@ -98,6 +151,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUserId = AuthService().currentUser?.id ?? 1;
+    final otherUserId = widget.otherUserId ??
+        (widget.booking != null
+            ? (currentUserId == widget.booking!.customerId ? widget.booking!.workerId : widget.booking!.customerId)
+            : 0);
+    final otherPhoto = _resolveOtherPhoto(otherUserId);
+    final otherInitial = widget.otherUserName.isNotEmpty ? widget.otherUserName[0].toUpperCase() : 'U';
+
     return Scaffold(
       backgroundColor: AppTheme.sbBg,
       appBar: AppBar(
@@ -119,14 +180,34 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     gradient: AppTheme.gBlue,
                     shape: BoxShape.circle,
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    widget.otherUserName.isNotEmpty ? widget.otherUserName[0].toUpperCase() : 'U',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
+                  child: ClipOval(
+                    child: (otherPhoto != null && otherPhoto.isNotEmpty)
+                        ? Image.network(
+                            otherPhoto,
+                            width: 38,
+                            height: 38,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Center(
+                              child: Text(
+                                otherInitial,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                          )
+                        : Center(
+                            child: Text(
+                              otherInitial,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
                   ),
                 ),
                 Positioned(
@@ -390,10 +471,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
                         final timeStr = msg.sentAt != null
                             ? '${msg.sentAt!.hour.toString().padLeft(2, '0')}:${msg.sentAt!.minute.toString().padLeft(2, '0')}'
                             : '';
+                        final senderPhoto = isMe
+                            ? AuthService().currentUser?.profilePhotoUrl
+                            : (msg.sender?.profilePhotoUrl ?? otherPhoto);
+
                         return _buildMessageBubble(
                           isMe: isMe,
                           text: msg.content ?? '',
                           time: timeStr,
+                          senderPhoto: senderPhoto,
+                          senderInitial: isMe
+                              ? ((AuthService().currentUser?.fullName.isNotEmpty == true)
+                                  ? AuthService().currentUser!.fullName[0].toUpperCase()
+                                  : 'U')
+                              : otherInitial,
                         );
                       },
                     );
@@ -493,69 +584,119 @@ class _ConversationScreenState extends State<ConversationScreen> {
     required bool isMe,
     required String text,
     required String time,
+    String? senderPhoto,
+    String senderInitial = 'U',
   }) {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.76,
+          maxWidth: MediaQuery.of(context).size.width * 0.80,
         ),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-          decoration: BoxDecoration(
-            gradient: isMe ? AppTheme.gBlue : null,
-            color: isMe ? null : Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(18),
-              topRight: const Radius.circular(18),
-              bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
-              bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
-            ),
-            border: isMe ? null : Border.all(color: AppTheme.sbLine),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-            children: [
-              Text(
-                text,
-                style: TextStyle(
-                  color: isMe ? Colors.white : AppTheme.sbInk,
-                  fontSize: 14,
-                  height: 1.35,
-                  fontWeight: FontWeight.w500,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (!isMe) ...[
+              Container(
+                width: 28,
+                height: 28,
+                margin: const EdgeInsets.only(right: 8, bottom: 2),
+                decoration: const BoxDecoration(
+                  gradient: AppTheme.gBlue,
+                  shape: BoxShape.circle,
+                ),
+                child: ClipOval(
+                  child: (senderPhoto != null && senderPhoto.isNotEmpty)
+                      ? Image.network(
+                          senderPhoto,
+                          width: 28,
+                          height: 28,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Text(
+                              senderInitial,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        )
+                      : Center(
+                          child: Text(
+                            senderInitial,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
                 ),
               ),
-              const SizedBox(height: 5),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    time,
-                    style: TextStyle(
-                      color: isMe ? Colors.white.withOpacity(0.7) : AppTheme.sbInkFaint,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
+            ],
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                decoration: BoxDecoration(
+                  gradient: isMe ? AppTheme.gBlue : null,
+                  color: isMe ? null : Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(18),
+                    topRight: const Radius.circular(18),
+                    bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
+                    bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
                   ),
-                  if (isMe) ...[
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.done_all_rounded,
-                      size: 13,
-                      color: Colors.white70,
+                  border: isMe ? null : Border.all(color: AppTheme.sbLine),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
                     ),
                   ],
-                ],
+                ),
+                child: Column(
+                  crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      text,
+                      style: TextStyle(
+                        color: isMe ? Colors.white : AppTheme.sbInk,
+                        fontSize: 14,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: isMe ? Colors.white.withOpacity(0.7) : AppTheme.sbInkFaint,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.done_all_rounded,
+                            size: 13,
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../data/database_seeder.dart';
 import '../../models/user_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/profile_completion_modal.dart';
-import '../customer/customer_main_screen.dart';
 import '../landing_page_screen.dart';
-import '../worker/worker_main_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -22,8 +19,6 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isUploadingPhoto = false;
-  bool _isDbPurging = false;
-  bool _isDbSeeding = false;
 
   Future<void> _handlePickProfilePhoto() async {
     // Show source picker
@@ -179,82 +174,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _handleSwitchRole(BuildContext context, String targetRole) {
-    AuthService().switchDemoRole(targetRole);
-    final destination = targetRole == 'worker'
-        ? const WorkerMainScreen()
-        : const CustomerMainScreen();
-
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => destination),
-      (route) => false,
-    );
-  }
-
-  Future<void> _confirmPurgeDatabase(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Wipe to Clean Slate?'),
-        content: const Text(
-          'This will purge all Cloud Firestore test collections (users, workers, categories, bookings, job posts, messages, reviews) and reset caches for real CRUD testing.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Purge All'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    setState(() => _isDbPurging = true);
-    await DatabaseSeeder.clearAll();
-    MySqlService().clearLocalCache();
-    await MySqlService().refreshData();
-    if (mounted) {
-      setState(() => _isDbPurging = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All collections purged! Database is now a 100% clean slate.'),
-          backgroundColor: AppTheme.sbInk,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
-  Future<void> _runSeedDatabase(BuildContext context) async {
-    setState(() => _isDbSeeding = true);
-    await DatabaseSeeder.seedAll();
-    await MySqlService().refreshData();
-    if (mounted) {
-      setState(() => _isDbSeeding = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Sample data successfully seeded to Cloud Firestore.'),
-          backgroundColor: AppTheme.sbGreen,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: AuthService(),
+      listenable: Listenable.merge([AuthService(), MySqlService()]),
       builder: (context, _) {
         final auth = AuthService();
         final user = auth.currentUser;
@@ -482,10 +405,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       _buildStatsGrid(isWorker),
                       const SizedBox(height: 14),
 
-                      // Role Switcher Card
-                      _buildRoleSwitcher(context, isWorker),
-                      const SizedBox(height: 14),
-
                       // Personal Information Card
                       _buildPersonalInfoCard(user),
                       const SizedBox(height: 14),
@@ -502,10 +421,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       // Verification Card
                       _buildVerificationCard(user),
-                      const SizedBox(height: 14),
-
-                      // Database Testing & CRUD Controls
-                      _buildDatabaseToolsCard(context),
                       const SizedBox(height: 20),
 
                       // Sign Out Button
@@ -545,12 +460,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final allBookings = MySqlService().bookings;
     final user = AuthService().currentUser;
     final userId = user?.id;
+    final userUid = user?.uid;
+    final userEmail = user?.email.toLowerCase().trim();
 
     final userBookings = allBookings.where((b) {
+      if (user == null) return false;
       if (isWorker) {
-        return b.workerId == userId || b.worker?.id == userId;
+        if (userId != null && userId != 0 && b.workerId == userId) return true;
+        if (b.worker != null) {
+          if (userId != null && userId != 0 && b.worker!.id == userId) return true;
+          if (userUid != null && userUid.isNotEmpty && b.worker!.uid == userUid) return true;
+          if (userEmail != null && userEmail.isNotEmpty && b.worker!.email.toLowerCase().trim() == userEmail) return true;
+        }
+        return false;
       } else {
-        return b.customerId == userId || b.customer?.id == userId;
+        if (userId != null && userId != 0 && b.customerId == userId) return true;
+        if (b.customer != null) {
+          if (userId != null && userId != 0 && b.customer!.id == userId) return true;
+          if (userUid != null && userUid.isNotEmpty && b.customer!.uid == userUid) return true;
+          if (userEmail != null && userEmail.isNotEmpty && b.customer!.email.toLowerCase().trim() == userEmail) return true;
+        }
+        return false;
       }
     }).toList();
 
@@ -672,124 +602,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildRoleSwitcher(BuildContext context, bool isWorker) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.sbLine),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Switch Experience (Role Switcher)',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.sbInk,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Test the app from Customer or Service Worker perspective:',
-            style: TextStyle(
-              fontSize: 12,
-              color: AppTheme.sbInkSoft,
-              height: 1.3,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: GestureDetector(
-                  onTap: isWorker ? () => _handleSwitchRole(context, 'customer') : null,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    decoration: BoxDecoration(
-                      color: !isWorker ? const Color(0xFFF1F7F4) : AppTheme.sbField,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: !isWorker ? AppTheme.sbGreen : AppTheme.sbLine,
-                        width: !isWorker ? 1.5 : 1,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.person_rounded,
-                          size: 16,
-                          color: !isWorker ? AppTheme.sbGreen : AppTheme.sbInkSoft,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Customer View',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: !isWorker ? AppTheme.sbGreen : AppTheme.sbInkSoft,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: GestureDetector(
-                  onTap: !isWorker ? () => _handleSwitchRole(context, 'worker') : null,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    decoration: BoxDecoration(
-                      color: isWorker ? const Color(0xFFF1F7F4) : AppTheme.sbField,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isWorker ? AppTheme.sbGreen : AppTheme.sbLine,
-                        width: isWorker ? 1.5 : 1,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.handyman_rounded,
-                          size: 16,
-                          color: isWorker ? AppTheme.sbGreen : AppTheme.sbInkSoft,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Worker View',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: isWorker ? AppTheme.sbGreen : AppTheme.sbInkSoft,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPersonalInfoCard(dynamic user) {
     final name = (user?.displayName?.isNotEmpty == true ? user.displayName : user?.fullName)?.toString();
     final email = user?.email?.toString();
@@ -838,97 +650,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const Divider(height: 16, color: AppTheme.sbLine),
         _buildInfoTile('Experience', 'Verified Tradesman', Icons.history_edu_outlined),
       ],
-    );
-  }
-
-  Widget _buildDatabaseToolsCard(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.sbLine),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.storage_rounded, color: Color(0xFF2563EB), size: 16),
-              ),
-              const SizedBox(width: 10),
-              const Text(
-                'Database & CRUD Controls',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.sbInk,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Control Firestore test collections directly. Purge anytime for a pristine clean slate, or seed on demand.',
-            style: TextStyle(fontSize: 12, color: AppTheme.sbInkSoft, height: 1.3),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isDbPurging || _isDbSeeding ? null : () => _confirmPurgeDatabase(context),
-                  icon: _isDbPurging
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.delete_sweep_rounded, size: 16),
-                  label: const Text(
-                    'Wipe Clean Slate',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFDC2626),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    elevation: 0,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _isDbPurging || _isDbSeeding ? null : () => _runSeedDatabase(context),
-                  icon: _isDbSeeding
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.sbGreen))
-                      : const Icon(Icons.cloud_upload_rounded, size: 16, color: AppTheme.sbGreen),
-                  label: const Text(
-                    'Seed Sample Data',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.sbGreen),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppTheme.sbGreen),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 

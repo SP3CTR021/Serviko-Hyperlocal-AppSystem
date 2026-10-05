@@ -36,12 +36,14 @@ class MySqlService extends ChangeNotifier {
   List<BookingModel> _bookings = [];
   List<JobPostModel> _jobPosts = [];
   List<MessageModel> _messages = [];
+  List<UserModel> _users = [];
 
   List<ServiceCategoryModel> get categories => _categories;
   List<WorkerProfileModel> get workerProfiles => _workerProfiles;
   List<BookingModel> get bookings => _bookings;
   List<JobPostModel> get jobPosts => _jobPosts;
   List<MessageModel> get messages => _messages;
+  List<UserModel> get users => _users;
 
   /// Safe notifyListeners to prevent "setState() or markNeedsBuild() called during build" exceptions
   void _safeNotifyListeners() {
@@ -65,6 +67,7 @@ class MySqlService extends ChangeNotifier {
     _bookings = [];
     _jobPosts = [];
     _messages = [];
+    _users = [];
 
     await refreshData();
   }
@@ -75,6 +78,12 @@ class MySqlService extends ChangeNotifier {
     _bookings = [];
     _jobPosts = [];
     _messages = [];
+    _users = [];
+    _safeNotifyListeners();
+  }
+
+  void setWorkerProfilesForTesting(List<WorkerProfileModel> list) {
+    _workerProfiles = List.from(list);
     _safeNotifyListeners();
   }
 
@@ -86,6 +95,11 @@ class MySqlService extends ChangeNotifier {
 
     try {
       final fs = FirestoreService();
+      if (!fs.isFirebaseAvailable) {
+        _isConnected = true;
+        return;
+      }
+
       final fsCats = await fs.getCategories();
       _categories = fsCats;
 
@@ -100,6 +114,9 @@ class MySqlService extends ChangeNotifier {
 
       final fsMessages = await fs.getMessages();
       _messages = fsMessages;
+
+      final fsUsers = await fs.getUsers();
+      _users = fsUsers;
 
       _isConnected = true;
     } catch (e) {

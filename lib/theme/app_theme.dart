@@ -31,7 +31,8 @@ class AppTheme {
   static const Color sbSky = Color(0xFF3FD483);
   static const Color sbBlueSoft = Color(0xFFE7F7EE);
   static const Color sbAmber = Color(0xFFFFB020);
-  static const Color sbAmber2 = Color(0xFFFF8A3C);
+  static const Color sbAmber2 = Color(0xFF84CC16); // Yellow-Green
+  static const Color sbYellowGreen = Color(0xFF84CC16);
   static const Color sbAmberSoft = Color(0xFFFFF4E2);
   static const Color sbGreen = Color(0xFF12331F);
   static const Color sbGreenSoft = Color(0xFFE6F6EE);

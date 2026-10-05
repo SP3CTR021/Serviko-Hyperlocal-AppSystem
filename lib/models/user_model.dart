@@ -82,7 +82,10 @@ class UserModel {
       phoneNumber: map['phone_number']?.toString(),
       role: map['role']?.toString() ?? 'customer',
       skill: map['skill']?.toString(),
-      profilePhotoUrl: map['profile_photo_url']?.toString(),
+      profilePhotoUrl: map['profile_photo_url']?.toString() ??
+          map['profilePhotoUrl']?.toString() ??
+          map['photo_url']?.toString() ??
+          map['photoUrl']?.toString(),
       city: map['city']?.toString(),
       barangay: map['barangay']?.toString(),
       idType: map['id_type']?.toString(),

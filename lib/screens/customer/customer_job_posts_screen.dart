@@ -199,14 +199,17 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
 
                   final budget = double.tryParse(budgetText) ?? 500.0;
                   final currentUser = AuthService().currentUser;
+                  final locationStr = (currentUser?.locationString != null && currentUser!.locationString != 'Location not set')
+                      ? currentUser.locationString
+                      : (currentUser?.city ?? 'Davao City');
                   final newPost = JobPostModel(
                     jobPostId: DateTime.now().millisecondsSinceEpoch % 100000,
-                    customerId: currentUser?.id ?? 1,
+                    customerId: currentUser?.id ?? 0,
                     title: title,
                     description: desc,
-                    locationAddress: currentUser?.locationString ?? 'Local Area',
-                    city: currentUser?.city ?? 'Local City',
-                    barangay: currentUser?.barangay ?? 'Barangay',
+                    locationAddress: locationStr,
+                    city: currentUser?.city ?? 'Davao City',
+                    barangay: currentUser?.barangay ?? '',
                     budgetMin: budget,
                     budgetMax: budget * 1.5,
                     urgency: urgency.toLowerCase(),
@@ -248,8 +251,28 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: MySqlService(),
+      listenable: Listenable.merge([MySqlService(), AuthService()]),
       builder: (context, _) {
+        final currentUser = AuthService().currentUser;
+        final currentUserId = currentUser?.id;
+        final currentUserUid = currentUser?.uid;
+        final currentUserEmail = currentUser?.email.toLowerCase().trim();
+
+        final myCustomerPosts = MySqlService().jobPosts.where((p) {
+          if (currentUser == null) return false;
+          if (currentUserId != null && currentUserId != 0 && p.customerId == currentUserId) return true;
+          if (p.customer != null) {
+            if (currentUserId != null && currentUserId != 0 && p.customer!.id == currentUserId) return true;
+            if (currentUserUid != null && currentUserUid.isNotEmpty && p.customer!.uid == currentUserUid) return true;
+            if (currentUserEmail != null && currentUserEmail.isNotEmpty && p.customer!.email.toLowerCase().trim() == currentUserEmail) return true;
+          }
+          return false;
+        }).toList();
+
+        final openPosts = myCustomerPosts.where((p) => p.status == 'open' || p.status == 'in_review').toList();
+        final hiredPosts = myCustomerPosts.where((p) => p.status == 'hired').toList();
+        final closedPosts = myCustomerPosts.where((p) => p.status == 'closed' || p.status == 'completed').toList();
+
         return Scaffold(
           backgroundColor: AppTheme.sbSurface,
           appBar: AppBar(
@@ -300,80 +323,70 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
               child: Column(
-          children: [
-
-            // Post new job button
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _openCreateJobModal,
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  height: 50,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.gBlue,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x33148E4F),
-                        blurRadius: 16,
-                        offset: Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_rounded, color: Colors.white, size: 22),
-                      SizedBox(width: 8),
-                      Text(
-                        'Post a New Job',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w800,
+                children: [
+                  // Post new job button
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _openCreateJobModal,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        height: 50,
+                        decoration: BoxDecoration(
+                          gradient: AppTheme.gBlue,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x33148E4F),
+                              blurRadius: 16,
+                              offset: Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_rounded, color: Colors.white, size: 22),
+                            SizedBox(width: 8),
+                            Text(
+                              'Post a New Job',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Segmented Pills
+                  Row(
+                    children: [
+                      _buildSegButton(0, 'Open', badge: openPosts.isNotEmpty ? '${openPosts.length}' : null),
+                      const SizedBox(width: 8),
+                      _buildSegButton(1, 'Hired', badge: hiredPosts.isNotEmpty ? '${hiredPosts.length}' : null),
+                      const SizedBox(width: 8),
+                      _buildSegButton(2, 'Closed', badge: closedPosts.isNotEmpty ? '${closedPosts.length}' : null),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 16),
+
+                  // Tab Panels
+                  if (_selectedSeg == 0) _buildOpenPanel(openPosts),
+                  if (_selectedSeg == 1) _buildHiredPanel(hiredPosts),
+                  if (_selectedSeg == 2) _buildClosedPanel(closedPosts),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Segmented Pills
-            Builder(
-              builder: (context) {
-                final allPosts = MySqlService().jobPosts;
-                final openCount = allPosts.where((p) => p.status == 'open' || p.status == 'in_review').length;
-                final hiredCount = allPosts.where((p) => p.status == 'hired').length;
-                final closedCount = allPosts.where((p) => p.status == 'closed' || p.status == 'completed').length;
-
-                return Row(
-                  children: [
-                    _buildSegButton(0, 'Open', badge: openCount > 0 ? '$openCount' : null),
-                    const SizedBox(width: 8),
-                    _buildSegButton(1, 'Hired', badge: hiredCount > 0 ? '$hiredCount' : null),
-                    const SizedBox(width: 8),
-                    _buildSegButton(2, 'Closed', badge: closedCount > 0 ? '$closedCount' : null),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // Tab Panels
-            if (_selectedSeg == 0) _buildOpenPanel(),
-            if (_selectedSeg == 1) _buildHiredPanel(),
-            if (_selectedSeg == 2) _buildClosedPanel(),
-          ],
-        ),
-      ),
-    ),
-  );
-},
-);
-}
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildSegButton(int index, String label, {String? badge}) {
     final isSelected = _selectedSeg == index;
@@ -461,8 +474,7 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
     );
   }
 
-  Widget _buildOpenPanel() {
-    final posts = MySqlService().jobPosts.where((p) => p.status == 'open' || p.status == 'in_review').toList();
+  Widget _buildOpenPanel(List<JobPostModel> posts) {
     if (posts.isEmpty) {
       return _buildEmptyState('No open job posts', 'Post a job to get competitive bids from verified workers near you.', Icons.work_outline_rounded);
     }
@@ -471,8 +483,7 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
     );
   }
 
-  Widget _buildHiredPanel() {
-    final posts = MySqlService().jobPosts.where((p) => p.status == 'hired').toList();
+  Widget _buildHiredPanel(List<JobPostModel> posts) {
     if (posts.isEmpty) {
       return _buildEmptyState('No hired workers yet', 'Jobs with assigned contractors will appear here.', Icons.assignment_turned_in_outlined);
     }
@@ -481,8 +492,7 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
     );
   }
 
-  Widget _buildClosedPanel() {
-    final posts = MySqlService().jobPosts.where((p) => p.status == 'closed' || p.status == 'completed').toList();
+  Widget _buildClosedPanel(List<JobPostModel> posts) {
     if (posts.isEmpty) {
       return _buildEmptyState('No closed posts', 'Job posts that have been completed or closed will appear here.', Icons.inventory_2_outlined);
     }
@@ -866,15 +876,35 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
                                         gradient: AppTheme.gBlue,
                                         borderRadius: BorderRadius.circular(14),
                                       ),
-                                      child: Center(
-                                        child: Text(
-                                          initials,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 16,
-                                          ),
-                                        ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(14),
+                                        child: (bid.worker?.profilePhotoUrl != null && bid.worker!.profilePhotoUrl!.isNotEmpty)
+                                            ? Image.network(
+                                                bid.worker!.profilePhotoUrl!,
+                                                width: 44,
+                                                height: 44,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, __, ___) => Center(
+                                                  child: Text(
+                                                    initials,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight: FontWeight.w800,
+                                                      fontSize: 16,
+                                                    ),
+                                                  ),
+                                                ),
+                                              )
+                                            : Center(
+                                                child: Text(
+                                                  initials,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w800,
+                                                    fontSize: 16,
+                                                  ),
+                                                ),
+                                              ),
                                       ),
                                     ),
                                     const SizedBox(width: 12),
@@ -964,6 +994,7 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
                                                 otherUserId: bid.workerId,
                                                 otherUserName: workerName,
                                                 serviceTitle: post.title,
+                                                otherUserPhoto: bid.worker?.profilePhotoUrl,
                                               ),
                                             ),
                                           );
@@ -1053,7 +1084,9 @@ class _CustomerJobPostsScreenState extends State<CustomerJobPostsScreen> {
               final newBooking = BookingModel(
                 bookingId: DateTime.now().millisecondsSinceEpoch % 100000,
                 customerId: post.customerId,
+                customerUid: post.customer?.uid ?? AuthService().currentUser?.uid,
                 workerId: bid.workerId,
+                workerUid: bid.worker?.uid,
                 categoryId: post.categoryId,
                 serviceAddress: post.locationAddress ?? post.city ?? 'Local Area',
                 jobDescription: post.description,

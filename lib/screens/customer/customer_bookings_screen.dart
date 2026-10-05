@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../services/auth_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import '../chat/conversation_screen.dart';
@@ -21,85 +22,105 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final allBookings = MySqlService().bookings;
-    final activeBookings = allBookings.where((b) => b.status == 'accepted' || b.status == 'in_progress').toList();
-    final pendingBookings = allBookings.where((b) => b.status == 'pending').toList();
-    final completedBookings = allBookings.where((b) => b.status == 'completed').toList();
-    final cancelledBookings = allBookings.where((b) => b.status == 'cancelled').toList();
+    return ListenableBuilder(
+      listenable: Listenable.merge([MySqlService(), AuthService()]),
+      builder: (context, _) {
+        final currentUser = AuthService().currentUser;
+        final currentUserId = currentUser?.id;
+        final currentUserUid = currentUser?.uid;
+        final currentUserEmail = currentUser?.email.toLowerCase().trim();
 
-    return Scaffold(
-      backgroundColor: AppTheme.sbSurface,
-      appBar: AppBar(
-        backgroundColor: Colors.white.withValues(alpha: 0.90),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        title: const Text(
-          'My Bookings',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.sbInk,
-            letterSpacing: -0.2,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.sbInk),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Booking notifications')),
-              );
-            },
-          ),
-          if (widget.onOpenDrawer != null)
-            GestureDetector(
-              onTap: widget.onOpenDrawer,
-              child: Container(
-                margin: const EdgeInsets.only(right: 14),
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: AppTheme.sbInk,
-                  borderRadius: BorderRadius.circular(12),
+        final myCustomerBookings = MySqlService().bookings.where((b) {
+          if (currentUser == null) return false;
+          if (currentUserId != null && currentUserId != 0 && b.customerId == currentUserId) return true;
+          if (b.customer != null) {
+            if (currentUserId != null && currentUserId != 0 && b.customer!.id == currentUserId) return true;
+            if (currentUserUid != null && currentUserUid.isNotEmpty && b.customer!.uid == currentUserUid) return true;
+            if (currentUserEmail != null && currentUserEmail.isNotEmpty && b.customer!.email.toLowerCase().trim() == currentUserEmail) return true;
+          }
+          return false;
+        }).toList();
+
+        final activeBookings = myCustomerBookings.where((b) => b.status == 'accepted' || b.status == 'in_progress').toList();
+        final pendingBookings = myCustomerBookings.where((b) => b.status == 'pending').toList();
+        final completedBookings = myCustomerBookings.where((b) => b.status == 'completed').toList();
+        final cancelledBookings = myCustomerBookings.where((b) => b.status == 'cancelled').toList();
+
+        return Scaffold(
+          backgroundColor: AppTheme.sbSurface,
+          appBar: AppBar(
+            backgroundColor: Colors.white.withValues(alpha: 0.90),
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            title: const Text(
+              'My Bookings',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.sbInk,
+                letterSpacing: -0.2,
+              ),
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.sbInk),
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Booking notifications')),
+                  );
+                },
+              ),
+              if (widget.onOpenDrawer != null)
+                GestureDetector(
+                  onTap: widget.onOpenDrawer,
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 14),
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: AppTheme.sbInk,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.menu_rounded, color: Colors.white, size: 20),
+                  ),
                 ),
-                child: const Icon(Icons.menu_rounded, color: Colors.white, size: 20),
-              ),
+            ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(1),
+              child: Container(color: AppTheme.sbLine2, height: 1),
             ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: AppTheme.sbLine2, height: 1),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-        child: Column(
-          children: [
-            // Segmented Pills
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildSegButton(0, 'Active', badge: activeBookings.isNotEmpty ? '${activeBookings.length}' : null),
-                  const SizedBox(width: 8),
-                  _buildSegButton(1, 'Pending', badge: pendingBookings.isNotEmpty ? '${pendingBookings.length}' : null),
-                  const SizedBox(width: 8),
-                  _buildSegButton(2, 'Completed', badge: completedBookings.isNotEmpty ? '${completedBookings.length}' : null),
-                  const SizedBox(width: 8),
-                  _buildSegButton(3, 'Cancelled', badge: cancelledBookings.isNotEmpty ? '${cancelledBookings.length}' : null),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
+          ),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+            child: Column(
+              children: [
+                // Segmented Pills
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildSegButton(0, 'Active', badge: activeBookings.isNotEmpty ? '${activeBookings.length}' : null),
+                      const SizedBox(width: 8),
+                      _buildSegButton(1, 'Pending', badge: pendingBookings.isNotEmpty ? '${pendingBookings.length}' : null),
+                      const SizedBox(width: 8),
+                      _buildSegButton(2, 'Completed', badge: completedBookings.isNotEmpty ? '${completedBookings.length}' : null),
+                      const SizedBox(width: 8),
+                      _buildSegButton(3, 'Cancelled', badge: cancelledBookings.isNotEmpty ? '${cancelledBookings.length}' : null),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
 
-            // Tab Panels
-            if (_selectedSeg == 0) _buildActivePanel(activeBookings),
-            if (_selectedSeg == 1) _buildPendingPanel(pendingBookings),
-            if (_selectedSeg == 2) _buildDonePanel(completedBookings),
-            if (_selectedSeg == 3) _buildCancelledPanel(cancelledBookings),
-          ],
-        ),
-      ),
+                // Tab Panels
+                if (_selectedSeg == 0) _buildActivePanel(activeBookings),
+                if (_selectedSeg == 1) _buildPendingPanel(pendingBookings),
+                if (_selectedSeg == 2) _buildDonePanel(completedBookings),
+                if (_selectedSeg == 3) _buildCancelledPanel(cancelledBookings),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -181,6 +202,7 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
             workerName: workerName,
             workerSkill: workerSkill,
             workerInitials: initials,
+            workerPhotoUrl: b.worker?.profilePhotoUrl,
             avatarColor: const Color(0xFF10794A),
             amount: '₱${(b.totalAmount ?? 0).toInt()}',
             kv: {
@@ -201,6 +223,7 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
                           otherUserName: workerName,
                           serviceTitle: workerSkill,
                           booking: b,
+                          otherUserPhoto: b.worker?.profilePhotoUrl,
                         ),
                       ),
                     );
@@ -263,6 +286,7 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
             workerName: workerName,
             workerSkill: workerSkill,
             workerInitials: initials,
+            workerPhotoUrl: b.worker?.profilePhotoUrl,
             avatarColor: const Color(0xFF6B4BD8),
             amount: '₱${(b.totalAmount ?? 0).toInt()}',
             kv: {
@@ -312,6 +336,7 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
             workerName: workerName,
             workerSkill: workerSkill,
             workerInitials: initials,
+            workerPhotoUrl: b.worker?.profilePhotoUrl,
             avatarColor: const Color(0xFF1B9457),
             amount: '₱${(b.totalAmount ?? 0).toInt()}',
             kv: {
@@ -403,6 +428,7 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
     required String workerName,
     required String workerSkill,
     required String workerInitials,
+    String? workerPhotoUrl,
     required Color avatarColor,
     required String amount,
     required Map<String, String> kv,
@@ -457,15 +483,35 @@ class _CustomerBookingsScreenState extends State<CustomerBookingsScreen> {
                         color: avatarColor,
                         borderRadius: BorderRadius.circular(15),
                       ),
-                      child: Center(
-                        child: Text(
-                          workerInitials,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(15),
+                        child: (workerPhotoUrl != null && workerPhotoUrl.isNotEmpty)
+                            ? Image.network(
+                                workerPhotoUrl,
+                                width: 46,
+                                height: 46,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Center(
+                                  child: Text(
+                                    workerInitials,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : Center(
+                                child: Text(
+                                  workerInitials,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
                       ),
                     ),
                     const SizedBox(width: 12),

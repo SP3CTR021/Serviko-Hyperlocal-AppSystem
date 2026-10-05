@@ -241,6 +241,11 @@ class _JobMarketplaceScreenState extends State<JobMarketplaceScreen> {
       builder: (context, _) {
         // Map dynamic database job posts from MySqlService / Firestore
         final dbJobs = MySqlService().jobPosts.map((jp) {
+          final customer = jp.customer;
+          final customerName = customer?.fullName ?? customer?.name ?? 'Client';
+          final customerPhoto = customer?.profilePhotoUrl;
+          final customerInitials = (customerName.isNotEmpty) ? customerName[0].toUpperCase() : 'C';
+
           return {
             'job_post_id': jp.jobPostId,
             'cat': jp.categoryName ?? 'General',
@@ -252,6 +257,9 @@ class _JobMarketplaceScreenState extends State<JobMarketplaceScreen> {
             'desc': jp.description ?? '',
             'budget': jp.budgetDisplay,
             'timing': jp.preferredDate != null ? 'Date: ${jp.preferredDate!.month}/${jp.preferredDate!.day}' : 'Flexible',
+            'customer_name': customerName,
+            'customer_photo': customerPhoto,
+            'customer_initials': customerInitials,
           };
         });
 
@@ -389,39 +397,99 @@ class _JobMarketplaceScreenState extends State<JobMarketplaceScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Chips
+                      // Customer & Header row
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
-                              color: AppTheme.sbBlueSoft,
-                              borderRadius: BorderRadius.circular(99),
+                              color: const Color(0xFF0B1B33),
+                              borderRadius: BorderRadius.circular(14),
                             ),
-                            child: Text(
-                              job['cat'] as String,
-                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppTheme.sbBlue),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: (job['customer_photo'] != null && (job['customer_photo'] as String).isNotEmpty)
+                                  ? Image.network(
+                                      job['customer_photo'] as String,
+                                      width: 44,
+                                      height: 44,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Center(
+                                        child: Text(
+                                          job['customer_initials'] as String? ?? 'C',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        job['customer_initials'] as String? ?? 'C',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: job['tagColor'] as Color,
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            child: Text(
-                              job['tag'] as String,
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w800,
-                                color: job['tagTextColor'] as Color,
-                              ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  job['customer_name'] as String? ?? 'Client',
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.sbInk,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.sbBlueSoft,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        job['cat'] as String,
+                                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppTheme.sbBlue),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: job['tagColor'] as Color,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        job['tag'] as String,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: job['tagTextColor'] as Color,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
                       // Title
                       Text(

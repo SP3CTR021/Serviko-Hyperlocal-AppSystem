@@ -622,7 +622,7 @@ class _BookingCompletionSheetState extends State<_BookingCompletionSheet> {
                                 iconSize: 34,
                                 icon: Icon(
                                   starNum <= _rating ? Icons.star_rounded : Icons.star_outline_rounded,
-                                  color: starNum <= _rating ? const Color(0xFFFFB800) : AppTheme.sbInk4,
+                                  color: starNum <= _rating ? AppTheme.sbYellowGreen : AppTheme.sbInk4,
                                 ),
                                 onPressed: () => setState(() => _rating = starNum),
                               );

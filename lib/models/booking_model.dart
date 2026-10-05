@@ -18,6 +18,8 @@ class BookingModel {
   final DateTime? createdAt;
   final UserModel? customer;
   final UserModel? worker;
+  final String? customerUid;
+  final String? workerUid;
   final String? serviceName;
   final String? categoryName;
 
@@ -35,6 +37,8 @@ class BookingModel {
     required this.bookingId,
     required this.customerId,
     required this.workerId,
+    this.customerUid,
+    this.workerUid,
     this.workerServiceId,
     this.categoryId,
     this.scheduledDate,
@@ -94,6 +98,8 @@ class BookingModel {
       createdAt: map['created_at'] != null ? DateTime.tryParse(map['created_at'].toString()) : null,
       customer: customer,
       worker: worker,
+      customerUid: map['customer_uid']?.toString() ?? customer?.uid,
+      workerUid: map['worker_uid']?.toString() ?? worker?.uid,
       serviceName: serviceName ?? map['service_name']?.toString(),
       categoryName: categoryName ?? map['category_name']?.toString(),
       paymentMethod: map['payment_method']?.toString(),
@@ -113,6 +119,8 @@ class BookingModel {
       'booking_id': bookingId,
       'customer_id': customerId,
       'worker_id': workerId,
+      'customer_uid': customerUid ?? customer?.uid,
+      'worker_uid': workerUid ?? worker?.uid,
       'worker_service_id': workerServiceId,
       'category_id': categoryId,
       'scheduled_date': scheduledDate != null ? '${scheduledDate!.year}-${scheduledDate!.month.toString().padLeft(2, '0')}-${scheduledDate!.day.toString().padLeft(2, '0')}' : null,

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user_model.dart';
+import '../models/worker_profile_model.dart';
 import 'mysql_service.dart';
 
 class AuthService extends ChangeNotifier {
@@ -267,7 +268,7 @@ class AuthService extends ChangeNotifier {
           email: email,
           role: role,
           phoneNumber: phoneNumber,
-          city: city,
+          city: (city != null && city.trim().isNotEmpty) ? city.trim() : 'Davao City',
           barangay: barangay,
           skill: skill,
           memberSince: DateTime.now(),
@@ -278,8 +279,34 @@ class AuthService extends ChangeNotifier {
             newUser.toMap(),
             SetOptions(merge: true),
           );
+
+          if (role == 'worker') {
+            final newProfile = WorkerProfileModel(
+              workerProfileId: newUser.id,
+              userId: newUser.id,
+              primarySkill: skill ?? 'General Services',
+              yearsOfExperience: 1,
+              bio: 'New verified worker in ${newUser.city ?? 'Davao City'}',
+              totalJobsCompleted: 0,
+              avgRating: 0.0,
+              isIdVerified: false,
+              availabilityStatus: 'available',
+              user: newUser,
+              profilePhotoUrl: newUser.profilePhotoUrl,
+            );
+            final pMap = newProfile.toMap();
+            pMap['user'] = newUser.toMap();
+            await _firestore.collection('workers').doc(newUser.id.toString()).set(
+              pMap,
+              SetOptions(merge: true),
+            );
+            await _firestore.collection('worker_profiles').doc(newUser.id.toString()).set(
+              pMap,
+              SetOptions(merge: true),
+            );
+          }
         } catch (e) {
-          debugPrint('[AuthService] Firestore user write note: $e');
+          debugPrint('[AuthService] Firestore user/worker profile write note: $e');
         }
 
         _currentUser = newUser;
@@ -361,18 +388,22 @@ class AuthService extends ChangeNotifier {
         debugPrint('[AuthService] Firestore updatePhoto (numeric id) note: $e');
       }
 
-      // 4. If worker, also update workers collection if worker doc exists
+      // 4. If worker, also update workers and worker_profiles collections
       try {
-        final workerDoc = await _firestore
+        await _firestore
             .collection('workers')
             .doc(_currentUser!.id.toString())
-            .get();
-        if (workerDoc.exists) {
-          await _firestore
-              .collection('workers')
-              .doc(_currentUser!.id.toString())
-              .set({'user': dataToMerge}, SetOptions(merge: true));
-        }
+            .set({
+              'user': dataToMerge,
+              'profile_photo_url': url,
+            }, SetOptions(merge: true));
+        await _firestore
+            .collection('worker_profiles')
+            .doc(_currentUser!.id.toString())
+            .set({
+              'user': dataToMerge,
+              'profile_photo_url': url,
+            }, SetOptions(merge: true));
       } catch (e) {
         debugPrint('[AuthService] Firestore update worker photo note: $e');
       }
@@ -429,15 +460,17 @@ class AuthService extends ChangeNotifier {
       debugPrint('[AuthService] Firestore submitVerification (numeric id) note: $e');
     }
 
-    // 3. If worker, update workers collection
+    // 3. If worker, update workers and worker_profiles collections
     if (updated.isWorker) {
       try {
-        final workerDoc = await _firestore.collection('workers').doc(updated.id.toString()).get();
-        if (workerDoc.exists) {
-          await _firestore.collection('workers').doc(updated.id.toString()).set({
-            'user': data,
-          }, SetOptions(merge: true));
-        }
+        await _firestore.collection('workers').doc(updated.id.toString()).set({
+          'user': data,
+          if (updated.profilePhotoUrl != null) 'profile_photo_url': updated.profilePhotoUrl,
+        }, SetOptions(merge: true));
+        await _firestore.collection('worker_profiles').doc(updated.id.toString()).set({
+          'user': data,
+          if (updated.profilePhotoUrl != null) 'profile_photo_url': updated.profilePhotoUrl,
+        }, SetOptions(merge: true));
       } catch (_) {}
     }
 
@@ -475,6 +508,12 @@ class AuthService extends ChangeNotifier {
   // SIGN OUT
   Future<void> signOut() async {
     await logout();
+  }
+
+  @visibleForTesting
+  void setCurrentUserForTesting(UserModel? user) {
+    _currentUser = user;
+    notifyListeners();
   }
 
   Future<void> logout() async {

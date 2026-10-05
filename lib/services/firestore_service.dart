@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import '../data/database_seeder.dart';
-import '../data/sample_data.dart';
 import '../models/service_category_model.dart';
 import '../models/worker_profile_model.dart';
 import '../models/booking_model.dart';
@@ -16,7 +16,15 @@ class FirestoreService extends ChangeNotifier {
   factory FirestoreService() => _instance;
   FirestoreService._internal();
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  bool get isFirebaseAvailable {
+    try {
+      return Firebase.apps.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  FirebaseFirestore get _firestore => FirebaseFirestore.instance;
 
   CollectionReference get _usersCol => _firestore.collection('users');
   CollectionReference get _categoriesCol => _firestore.collection('categories');
@@ -58,15 +66,19 @@ class FirestoreService extends ChangeNotifier {
   // CATEGORIES CRUD
   // -------------------------------------------------------------
   Stream<List<ServiceCategoryModel>> getCategoriesStream() {
-    return _categoriesCol
-        .orderBy('display_order', descending: false)
-        .snapshots()
-        .map((snap) {
-      if (snap.docs.isEmpty) return [];
-      return snap.docs
-          .map((d) => ServiceCategoryModel.fromMap(d.data() as Map<String, dynamic>))
-          .toList();
-    });
+    try {
+      return _categoriesCol
+          .orderBy('display_order', descending: false)
+          .snapshots()
+          .map((snap) {
+        if (snap.docs.isEmpty) return [];
+        return snap.docs
+            .map((d) => ServiceCategoryModel.fromMap(d.data() as Map<String, dynamic>))
+            .toList();
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   Future<List<ServiceCategoryModel>> getCategories() async {
@@ -87,23 +99,9 @@ class FirestoreService extends ChangeNotifier {
   // WORKERS CRUD
   // -------------------------------------------------------------
   Stream<List<WorkerProfileModel>> getWorkersStream() {
-    return _workersCol.snapshots().map((snap) {
-      if (snap.docs.isEmpty) return [];
-      return snap.docs.map((d) {
-        final map = d.data() as Map<String, dynamic>;
-        UserModel? user;
-        if (map['user'] != null && map['user'] is Map<String, dynamic>) {
-          user = UserModel.fromMap(map['user'] as Map<String, dynamic>);
-        }
-        return WorkerProfileModel.fromMap(map, user: user);
-      }).toList();
-    });
-  }
-
-  Future<List<WorkerProfileModel>> getWorkers() async {
     try {
-      final snap = await _workersCol.get();
-      if (snap.docs.isNotEmpty) {
+      return _workersCol.snapshots().map((snap) {
+        if (snap.docs.isEmpty) return [];
         return snap.docs.map((d) {
           final map = d.data() as Map<String, dynamic>;
           UserModel? user;
@@ -112,7 +110,79 @@ class FirestoreService extends ChangeNotifier {
           }
           return WorkerProfileModel.fromMap(map, user: user);
         }).toList();
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
+  }
+
+  Future<List<WorkerProfileModel>> getWorkers() async {
+    try {
+      final Map<int, WorkerProfileModel> workerMap = {};
+
+      // 1. Fetch from workers collection
+      final snap = await _workersCol.get();
+      for (final d in snap.docs) {
+        final map = d.data() as Map<String, dynamic>;
+        UserModel? user;
+        if (map['user'] != null && map['user'] is Map<String, dynamic>) {
+          user = UserModel.fromMap(map['user'] as Map<String, dynamic>);
+        }
+        final wp = WorkerProfileModel.fromMap(map, user: user);
+        if (wp.userId != 0) {
+          workerMap[wp.userId] = wp;
+        }
       }
+
+      // 2. Also fetch registered workers from users collection
+      final userSnap = await _usersCol.where('role', isEqualTo: 'worker').get();
+      for (final d in userSnap.docs) {
+        final uMap = d.data() as Map<String, dynamic>;
+        final user = UserModel.fromMap(uMap);
+        if (user.id != 0) {
+          if (!workerMap.containsKey(user.id)) {
+            final skill = user.skill ?? 'Services';
+            workerMap[user.id] = WorkerProfileModel(
+              workerProfileId: user.id,
+              userId: user.id,
+              primarySkill: skill,
+              yearsOfExperience: 1,
+              bio: 'Verified professional in ${user.city ?? 'Davao City'}',
+              totalJobsCompleted: 0,
+              avgRating: 5.0,
+              isIdVerified: user.isVerified,
+              availabilityStatus: 'available',
+              user: user,
+              profilePhotoUrl: user.profilePhotoUrl,
+            );
+          } else if (workerMap[user.id]!.user == null || workerMap[user.id]!.profilePhotoUrl == null) {
+            final existing = workerMap[user.id]!;
+            workerMap[user.id] = WorkerProfileModel(
+              workerProfileId: existing.workerProfileId,
+              userId: existing.userId,
+              initials: existing.initials,
+              avatarColor: existing.avatarColor,
+              bio: existing.bio,
+              primarySkill: existing.primarySkill ?? user.skill,
+              yearsOfExperience: existing.yearsOfExperience,
+              serviceRadiusKm: existing.serviceRadiusKm,
+              basePrice: existing.basePrice,
+              priceType: existing.priceType,
+              availabilityStatus: existing.availabilityStatus,
+              avgRating: existing.avgRating,
+              totalJobsCompleted: existing.totalJobsCompleted,
+              completionRate: existing.completionRate,
+              isIdVerified: existing.isIdVerified || user.isVerified,
+              idType: existing.idType,
+              user: existing.user ?? user,
+              profilePhotoUrl: existing.profilePhotoUrl ?? user.profilePhotoUrl,
+              services: existing.services,
+            );
+          }
+        }
+      }
+
+      return workerMap.values.toList();
     } catch (e) {
       debugPrint('[FirestoreService] getWorkers note: $e');
     }
@@ -204,6 +274,8 @@ class FirestoreService extends ChangeNotifier {
       if (booking.worker != null) {
         map['worker'] = booking.worker!.toMap();
       }
+      map['customer_uid'] = booking.customerUid ?? booking.customer?.uid;
+      map['worker_uid'] = booking.workerUid ?? booking.worker?.uid;
       map['service_name'] = booking.serviceName;
       map['category_name'] = booking.categoryName;
 
@@ -329,17 +401,21 @@ class FirestoreService extends ChangeNotifier {
   // JOB POSTS & BIDS CRUD
   // -------------------------------------------------------------
   Stream<List<JobPostModel>> getJobPostsStream() {
-    return _jobPostsCol.snapshots().map((snap) {
-      if (snap.docs.isEmpty) return [];
-      return snap.docs.map((d) {
-        final map = d.data() as Map<String, dynamic>;
-        UserModel? customer;
-        if (map['customer'] != null && map['customer'] is Map<String, dynamic>) {
-          customer = UserModel.fromMap(map['customer'] as Map<String, dynamic>);
-        }
-        return JobPostModel.fromMap(map, customer: customer);
-      }).toList();
-    });
+    try {
+      return _jobPostsCol.snapshots().map((snap) {
+        if (snap.docs.isEmpty) return [];
+        return snap.docs.map((d) {
+          final map = d.data() as Map<String, dynamic>;
+          UserModel? customer;
+          if (map['customer'] != null && map['customer'] is Map<String, dynamic>) {
+            customer = UserModel.fromMap(map['customer'] as Map<String, dynamic>);
+          }
+          return JobPostModel.fromMap(map, customer: customer);
+        }).toList();
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   Future<List<JobPostModel>> getJobPosts() async {
@@ -352,6 +428,16 @@ class FirestoreService extends ChangeNotifier {
           UserModel? customer;
           if (map['customer'] != null && map['customer'] is Map<String, dynamic>) {
             customer = UserModel.fromMap(map['customer'] as Map<String, dynamic>);
+          } else if (map['customer_id'] != null) {
+            final cId = map['customer_id'] is int ? map['customer_id'] : int.tryParse(map['customer_id'].toString());
+            if (cId != null && cId != 0) {
+              try {
+                final uSnap = await _usersCol.where('id', isEqualTo: cId).limit(1).get();
+                if (uSnap.docs.isNotEmpty) {
+                  customer = UserModel.fromMap(uSnap.docs.first.data() as Map<String, dynamic>);
+                }
+              } catch (_) {}
+            }
           }
           final rawJobId = map['job_post_id'] ?? d.id;
           final intJobId = rawJobId is int ? rawJobId : int.tryParse(rawJobId.toString());
@@ -465,31 +551,85 @@ class FirestoreService extends ChangeNotifier {
   }
 
   // -------------------------------------------------------------
+  // USERS CRUD & LOOKUP
+  // -------------------------------------------------------------
+  Stream<List<UserModel>> getUsersStream() {
+    try {
+      return _usersCol.snapshots().map((snap) {
+        if (snap.docs.isEmpty) return [];
+        final Map<int, UserModel> userMap = {};
+        for (final d in snap.docs) {
+          final map = d.data() as Map<String, dynamic>;
+          final user = UserModel.fromMap(map);
+          if (user.id != 0) {
+            if (!userMap.containsKey(user.id) || (user.profilePhotoUrl != null && user.profilePhotoUrl!.isNotEmpty)) {
+              userMap[user.id] = user;
+            }
+          }
+        }
+        return userMap.values.toList();
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
+  }
+
+  Future<List<UserModel>> getUsers() async {
+    try {
+      final snap = await _usersCol.get();
+      if (snap.docs.isNotEmpty) {
+        final Map<int, UserModel> userMap = {};
+        for (final d in snap.docs) {
+          final map = d.data() as Map<String, dynamic>;
+          final user = UserModel.fromMap(map);
+          if (user.id != 0) {
+            if (!userMap.containsKey(user.id) || (user.profilePhotoUrl != null && user.profilePhotoUrl!.isNotEmpty)) {
+              userMap[user.id] = user;
+            }
+          }
+        }
+        return userMap.values.toList();
+      }
+    } catch (e) {
+      debugPrint('[FirestoreService] getUsers note: $e');
+    }
+    return [];
+  }
+
+  // -------------------------------------------------------------
   // CHAT / MESSAGES CRUD
   // -------------------------------------------------------------
   Stream<List<MessageModel>> getMessagesStream(int bookingId) {
-    return _messagesCol
-        .where('booking_id', isEqualTo: bookingId)
-        .snapshots()
-        .map((snap) {
-      if (snap.docs.isEmpty) return [];
-      final list = snap.docs
-          .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
-          .toList();
-      list.sort((a, b) => (a.sentAt ?? DateTime(2000)).compareTo(b.sentAt ?? DateTime(2000)));
-      return list;
-    });
+    try {
+      return _messagesCol
+          .where('booking_id', isEqualTo: bookingId)
+          .snapshots()
+          .map((snap) {
+        if (snap.docs.isEmpty) return [];
+        final list = snap.docs
+            .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
+            .toList();
+        list.sort((a, b) => (a.sentAt ?? DateTime(2000)).compareTo(b.sentAt ?? DateTime(2000)));
+        return list;
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   Stream<List<MessageModel>> getAllMessagesStream() {
-    return _messagesCol.snapshots().map((snap) {
-      if (snap.docs.isEmpty) return [];
-      final list = snap.docs
-          .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
-          .toList();
-      list.sort((a, b) => (a.sentAt ?? DateTime(2000)).compareTo(b.sentAt ?? DateTime(2000)));
-      return list;
-    });
+    try {
+      return _messagesCol.snapshots().map((snap) {
+        if (snap.docs.isEmpty) return [];
+        final list = snap.docs
+            .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
+            .toList();
+        list.sort((a, b) => (a.sentAt ?? DateTime(2000)).compareTo(b.sentAt ?? DateTime(2000)));
+        return list;
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   Stream<List<MessageModel>> getConversationStream({
@@ -497,30 +637,34 @@ class FirestoreService extends ChangeNotifier {
     int? currentUserId,
     int? otherUserId,
   }) {
-    return _messagesCol.snapshots().map((snap) {
-      if (snap.docs.isEmpty) return [];
-      final all = snap.docs
-          .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
-          .toList();
+    try {
+      return _messagesCol.snapshots().map((snap) {
+        if (snap.docs.isEmpty) return [];
+        final all = snap.docs
+            .map((d) => MessageModel.fromMap(d.data() as Map<String, dynamic>))
+            .toList();
 
-      final filtered = all.where((m) {
-        if (bookingId != null && m.bookingId == bookingId) return true;
-        if (currentUserId != null && otherUserId != null) {
-          final isMatch = (m.senderId == currentUserId && m.receiverId == otherUserId) ||
-                          (m.senderId == otherUserId && m.receiverId == currentUserId);
-          if (isMatch) return true;
-        }
-        return false;
-      }).toList();
+        final filtered = all.where((m) {
+          if (bookingId != null && m.bookingId == bookingId) return true;
+          if (currentUserId != null && otherUserId != null) {
+            final isMatch = (m.senderId == currentUserId && m.receiverId == otherUserId) ||
+                            (m.senderId == otherUserId && m.receiverId == currentUserId);
+            if (isMatch) return true;
+          }
+          return false;
+        }).toList();
 
-      filtered.sort((a, b) {
-        final aTime = a.sentAt ?? DateTime(2000);
-        final bTime = b.sentAt ?? DateTime(2000);
-        return aTime.compareTo(bTime);
+        filtered.sort((a, b) {
+          final aTime = a.sentAt ?? DateTime(2000);
+          final bTime = b.sentAt ?? DateTime(2000);
+          return aTime.compareTo(bTime);
+        });
+
+        return filtered;
       });
-
-      return filtered;
-    });
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   Future<List<MessageModel>> getMessages({int? bookingId}) async {
@@ -568,16 +712,20 @@ class FirestoreService extends ChangeNotifier {
   // REVIEWS CRUD
   // -------------------------------------------------------------
   Stream<List<ReviewModel>> getReviewsStream(int revieweeId) {
-    return _reviewsCol
-        .where('reviewee_id', isEqualTo: revieweeId)
-        .orderBy('created_at', descending: true)
-        .snapshots()
-        .map((snap) {
-      if (snap.docs.isEmpty) return [];
-      return snap.docs
-          .map((d) => ReviewModel.fromMap(d.data() as Map<String, dynamic>))
-          .toList();
-    });
+    try {
+      return _reviewsCol
+          .where('reviewee_id', isEqualTo: revieweeId)
+          .orderBy('created_at', descending: true)
+          .snapshots()
+          .map((snap) {
+        if (snap.docs.isEmpty) return [];
+        return snap.docs
+            .map((d) => ReviewModel.fromMap(d.data() as Map<String, dynamic>))
+            .toList();
+      });
+    } catch (_) {
+      return const Stream.empty();
+    }
   }
 
   Future<bool> createReview(ReviewModel review) async {

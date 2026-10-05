@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../models/booking_model.dart';
 import '../../models/message_model.dart';
+import '../../models/user_model.dart';
+import '../../models/worker_profile_model.dart';
+import '../../models/job_post_model.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/mysql_service.dart';
@@ -26,6 +29,65 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  String? _resolveUserPhoto(
+    int userId, {
+    UserModel? directUser,
+    List<WorkerProfileModel>? workers,
+    List<BookingModel>? bookings,
+    List<JobPostModel>? jobPosts,
+    List<MessageModel>? messages,
+    List<UserModel>? users,
+  }) {
+    if (directUser?.profilePhotoUrl != null && directUser!.profilePhotoUrl!.isNotEmpty) {
+      return directUser.profilePhotoUrl;
+    }
+    if (users != null) {
+      final u = users.where((u) => u.id == userId).firstOrNull;
+      if (u?.profilePhotoUrl != null && u!.profilePhotoUrl!.isNotEmpty) {
+        return u.profilePhotoUrl;
+      }
+    }
+    if (workers != null) {
+      final wp = workers.where((w) => w.userId == userId).firstOrNull;
+      if (wp?.photoUrl != null && wp!.photoUrl!.isNotEmpty) return wp.photoUrl;
+      if (wp?.profilePhotoUrl != null && wp!.profilePhotoUrl!.isNotEmpty) return wp.profilePhotoUrl;
+      if (wp?.user?.profilePhotoUrl != null && wp!.user!.profilePhotoUrl!.isNotEmpty) return wp.user!.profilePhotoUrl;
+    }
+    if (bookings != null) {
+      for (final b in bookings) {
+        if (b.customerId == userId && b.customer?.profilePhotoUrl != null && b.customer!.profilePhotoUrl!.isNotEmpty) {
+          return b.customer!.profilePhotoUrl;
+        }
+        if (b.workerId == userId && b.worker?.profilePhotoUrl != null && b.worker!.profilePhotoUrl!.isNotEmpty) {
+          return b.worker!.profilePhotoUrl;
+        }
+      }
+    }
+    if (jobPosts != null) {
+      for (final jp in jobPosts) {
+        if (jp.customerId == userId && jp.customer?.profilePhotoUrl != null && jp.customer!.profilePhotoUrl!.isNotEmpty) {
+          return jp.customer!.profilePhotoUrl;
+        }
+        for (final bid in jp.bids) {
+          if (bid.workerId == userId && bid.worker?.profilePhotoUrl != null && bid.worker!.profilePhotoUrl!.isNotEmpty) {
+            return bid.worker!.profilePhotoUrl;
+          }
+        }
+      }
+    }
+    if (messages != null) {
+      for (final m in messages) {
+        if (m.senderId == userId && m.sender?.profilePhotoUrl != null && m.sender!.profilePhotoUrl!.isNotEmpty) {
+          return m.sender!.profilePhotoUrl;
+        }
+        if (m.receiverId == userId && m.receiver?.profilePhotoUrl != null && m.receiver!.profilePhotoUrl!.isNotEmpty) {
+          return m.receiver!.profilePhotoUrl;
+        }
+      }
+    }
+    return null;
   }
 
   String _formatTimestamp(DateTime? dt) {
@@ -139,13 +201,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     final allMessages = snapshot.data ?? MySqlService().messages;
                     final allBookings = MySqlService().bookings;
                     final allWorkers = MySqlService().workerProfiles;
+                    final allJobPosts = MySqlService().jobPosts;
+                    final allUsers = MySqlService().users;
 
                     final Map<int, Map<String, dynamic>> threadMap = {};
 
                     // 1. Add active/past bookings involving the logged-in user
                     for (final b in allBookings) {
-                      final isCustomer = (b.customerId == currentUserId);
-                      final isWorker = (b.workerId == currentUserId);
+                      final isCustomer = currentUserId != 0 && (b.customerId == currentUserId || b.customer?.id == currentUserId);
+                      final isWorker = currentUserId != 0 && (b.workerId == currentUserId || b.worker?.id == currentUserId);
                       if (!isCustomer && !isWorker) continue;
 
                       final otherId = isCustomer ? b.workerId : b.customerId;
@@ -169,6 +233,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
                       final serviceTitle = b.serviceName ?? b.categoryName ?? 'Service Booking';
                       final date = b.createdAt ?? DateTime(2000);
+                      final photo = _resolveUserPhoto(
+                        otherId,
+                        directUser: otherUser,
+                        workers: allWorkers,
+                        bookings: allBookings,
+                        jobPosts: allJobPosts,
+                        messages: allMessages,
+                        users: allUsers,
+                      );
 
                       threadMap[otherId] = {
                         'id': otherId,
@@ -179,6 +252,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         'b': 0,
                         'latestDate': date,
                         'booking': b,
+                        'photo': photo,
                       };
                     }
 
@@ -193,6 +267,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
                       final otherUser = isSender ? m.receiver : m.sender;
                       final msgDate = m.sentAt ?? DateTime(2000);
+                      final photo = _resolveUserPhoto(
+                        otherId,
+                        directUser: otherUser,
+                        workers: allWorkers,
+                        bookings: allBookings,
+                        jobPosts: allJobPosts,
+                        messages: allMessages,
+                        users: allUsers,
+                      );
 
                       if (!threadMap.containsKey(otherId)) {
                         String? resolvedName;
@@ -215,6 +298,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           'b': 0,
                           'latestDate': msgDate,
                           'booking': null,
+                          'photo': photo,
                         };
                       } else {
                         final existingDate = threadMap[otherId]!['latestDate'] as DateTime;
@@ -234,6 +318,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 : otherUser.name;
                           }
                         }
+
+                        if ((threadMap[otherId]!['photo'] == null || (threadMap[otherId]!['photo'] as String).isEmpty) &&
+                            photo != null && photo.isNotEmpty) {
+                          threadMap[otherId]!['photo'] = photo;
+                        }
                       }
 
                       if (isReceiver && !m.isRead) {
@@ -241,12 +330,24 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       }
                     }
 
-                    // 3. Post-processing threads: sort & compute initials/colors
+                    // 3. Post-processing threads: sort & compute initials/colors/photos
                     final allThreads = threadMap.values.toList();
                     allThreads.sort((a, b) =>
                         (b['latestDate'] as DateTime).compareTo(a['latestDate'] as DateTime));
 
                     for (final t in allThreads) {
+                      final id = t['id'] as int;
+                      if (t['photo'] == null || (t['photo'] as String).isEmpty) {
+                        t['photo'] = _resolveUserPhoto(
+                          id,
+                          workers: allWorkers,
+                          bookings: allBookings,
+                          jobPosts: allJobPosts,
+                          messages: allMessages,
+                          users: allUsers,
+                        );
+                      }
+
                       final name = (t['n'] as String).trim();
                       final parts = name.split(' ');
                       String initials = '';
@@ -259,7 +360,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       }
                       t['i'] = initials;
 
-                      final id = t['id'] as int;
                       const colors = [
                         Color(0xFF10794A),
                         Color(0xFF0284C7),
@@ -321,7 +421,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               physics: const AlwaysScrollableScrollPhysics(),
                               itemCount: list.length,
                               separatorBuilder: (_, __) =>
-                                  const Divider(height: 1, color: AppTheme.sbLine2),
+                                   const Divider(height: 1, color: AppTheme.sbLine2),
                               itemBuilder: (context, idx) {
                                 final item = list[idx];
                                 final hasUnread = (item['b'] as int) > 0;
@@ -336,6 +436,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           otherUserName: item['n'] as String,
                                           serviceTitle: item['s'] as String?,
                                           booking: item['booking'] as BookingModel?,
+                                          otherUserPhoto: item['photo'] as String?,
                                         ),
                                       ),
                                     );
@@ -352,15 +453,35 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                             color: item['c'] as Color,
                                             borderRadius: BorderRadius.circular(16),
                                           ),
-                                          child: Center(
-                                            child: Text(
-                                              item['i'] as String,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w800,
-                                              ),
-                                            ),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(16),
+                                            child: (item['photo'] != null && (item['photo'] as String).isNotEmpty)
+                                                ? Image.network(
+                                                    item['photo'] as String,
+                                                    width: 50,
+                                                    height: 50,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (_, __, ___) => Center(
+                                                      child: Text(
+                                                        item['i'] as String,
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 16,
+                                                          fontWeight: FontWeight.w800,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  )
+                                                : Center(
+                                                    child: Text(
+                                                      item['i'] as String,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 16,
+                                                        fontWeight: FontWeight.w800,
+                                                      ),
+                                                    ),
+                                                  ),
                                           ),
                                         ),
                                         const SizedBox(width: 13),

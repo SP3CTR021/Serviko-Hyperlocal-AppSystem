@@ -18,8 +18,11 @@ class WorkerProfileModel {
   final double completionRate;
   final bool isIdVerified;
   final String? idType;
+  final String? profilePhotoUrl;
   final UserModel? user;
   final List<WorkerServiceModel> services;
+
+  String? get photoUrl => profilePhotoUrl ?? user?.profilePhotoUrl;
 
   WorkerProfileModel({
     required this.workerProfileId,
@@ -38,6 +41,7 @@ class WorkerProfileModel {
     this.completionRate = 0.0,
     this.isIdVerified = false,
     this.idType,
+    this.profilePhotoUrl,
     this.user,
     this.services = const [],
   });
@@ -79,6 +83,11 @@ class WorkerProfileModel {
       completionRate: map['completion_rate'] != null ? double.tryParse(map['completion_rate'].toString()) ?? 0.0 : 0.0,
       isIdVerified: map['is_id_verified'] == 1 || map['is_id_verified'] == true,
       idType: map['id_type']?.toString(),
+      profilePhotoUrl: map['profile_photo_url']?.toString() ??
+          map['profilePhotoUrl']?.toString() ??
+          map['photo_url']?.toString() ??
+          map['photoUrl']?.toString() ??
+          user?.profilePhotoUrl,
       user: user,
       services: services,
     );
@@ -102,6 +111,7 @@ class WorkerProfileModel {
       'completion_rate': completionRate,
       'is_id_verified': isIdVerified ? 1 : 0,
       'id_type': idType,
+      if (profilePhotoUrl != null) 'profile_photo_url': profilePhotoUrl,
     };
   }
 }

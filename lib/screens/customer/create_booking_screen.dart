@@ -71,8 +71,10 @@ class _CreateBookingScreenState extends State<CreateBookingScreen> {
 
     final newBooking = BookingModel(
       bookingId: DateTime.now().millisecondsSinceEpoch % 100000,
-      customerId: currentUser?.id ?? 1,
-      workerId: widget.worker.userId,
+      customerId: currentUser?.id ?? 0,
+      customerUid: currentUser?.uid,
+      workerId: widget.worker.userId != 0 ? widget.worker.userId : widget.worker.workerProfileId,
+      workerUid: widget.worker.user?.uid,
       workerServiceId: _selectedService?.workerServiceId,
       categoryId: _selectedService?.categoryId,
       scheduledDate: _selectedDate,

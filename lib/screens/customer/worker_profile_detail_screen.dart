@@ -48,6 +48,7 @@ class WorkerProfileDetailScreen extends StatelessWidget {
                         otherUserId: worker.userId,
                         otherUserName: worker.user?.fullName ?? 'Worker',
                         serviceTitle: worker.primarySkill,
+                        otherUserPhoto: worker.photoUrl,
                       ),
                     ),
                   );
@@ -94,10 +95,15 @@ class WorkerProfileDetailScreen extends StatelessWidget {
                   CircleAvatar(
                     radius: 36,
                     backgroundColor: AppTheme.primaryLight,
-                    child: Text(
-                      worker.initials ?? worker.user?.fullName.substring(0, 1).toUpperCase() ?? 'W',
-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
-                    ),
+                    backgroundImage: (worker.photoUrl != null && worker.photoUrl!.isNotEmpty)
+                        ? NetworkImage(worker.photoUrl!)
+                        : null,
+                    child: (worker.photoUrl == null || worker.photoUrl!.isEmpty)
+                        ? Text(
+                            worker.initials ?? (worker.user?.fullName.isNotEmpty == true ? worker.user!.fullName.substring(0, 1).toUpperCase() : 'W'),
+                            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                          )
+                        : null,
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -130,7 +136,7 @@ class WorkerProfileDetailScreen extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildStatColumn('Rating', '${worker.avgRating} ★'),
+                      _buildStatColumn('Rating', '${worker.avgRating}', isRating: true),
                       _buildStatColumn('Jobs Done', '${worker.totalJobsCompleted}'),
                       _buildStatColumn('Experience', '${worker.yearsOfExperience} yrs'),
                       _buildStatColumn('Status', worker.availabilityStatus.toUpperCase()),
@@ -191,10 +197,20 @@ class WorkerProfileDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatColumn(String label, String value) {
+  Widget _buildStatColumn(String label, String value, {bool isRating = false}) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+        if (isRating)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
+              const SizedBox(width: 3),
+              const Icon(Icons.star_rounded, size: 16, color: AppTheme.sbYellowGreen),
+            ],
+          )
+        else
+          Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textPrimary)),
         const SizedBox(height: 2),
         Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
       ],

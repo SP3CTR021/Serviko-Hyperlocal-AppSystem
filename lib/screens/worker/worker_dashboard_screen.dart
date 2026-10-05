@@ -24,6 +24,12 @@ class WorkerDashboardScreen extends StatefulWidget {
 class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
   bool _isAvailable = true;
 
+  @override
+  void initState() {
+    super.initState();
+    MySqlService().refreshData();
+  }
+
   void _openBidModal(JobPostModel job) {
     if (!VerificationGuard.check(context, actionName: 'submit a bid on this job')) return;
 
@@ -140,7 +146,7 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                   final newBid = BidModel(
                     bidId: DateTime.now().millisecondsSinceEpoch % 100000,
                     jobPostId: job.jobPostId,
-                    workerId: currentUser?.id ?? 2,
+                    workerId: currentUser?.id ?? 0,
                     proposedPrice: price,
                     message: msg.isNotEmpty ? msg : 'Available to work on this job.',
                     estimatedDuration: duration,
@@ -184,25 +190,72 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = AuthService().currentUser;
-    final userName = currentUser?.fullName ?? currentUser?.name ?? 'Worker';
-    final userPhotoUrl = currentUser?.profilePhotoUrl;
-    final userInitials = (userName.isNotEmpty && userName != 'Worker')
-        ? userName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join().toUpperCase()
-        : 'W';
+    return ListenableBuilder(
+      listenable: Listenable.merge([MySqlService(), AuthService()]),
+      builder: (context, _) {
+        final currentUser = AuthService().currentUser;
+        final userName = currentUser?.fullName ?? currentUser?.name ?? 'Worker';
+        final currentUserId = currentUser?.id;
+        final currentUserUid = currentUser?.uid;
+        final currentUserEmail = currentUser?.email.toLowerCase().trim();
+        final matchingProfiles = MySqlService().workerProfiles.where(
+          (wp) => (currentUserId != null && currentUserId != 0 && wp.userId == currentUserId) ||
+                  (currentUserUid != null && wp.user?.uid == currentUserUid),
+        );
+        final workerProfilePhoto = matchingProfiles.isNotEmpty ? matchingProfiles.first.photoUrl : null;
+        final userPhotoUrl = (currentUser?.profilePhotoUrl != null && currentUser!.profilePhotoUrl!.isNotEmpty)
+            ? currentUser.profilePhotoUrl
+            : workerProfilePhoto;
+        final userInitials = (userName.isNotEmpty && userName != 'Worker')
+            ? userName.split(' ').map((s) => s.isNotEmpty ? s[0] : '').take(2).join().toUpperCase()
+            : 'W';
 
-    final bookings = MySqlService().bookings;
-    final pendingRequests = bookings.where((b) => b.status == 'pending').toList();
-    final completedJobs = bookings.where((b) => b.status == 'completed').toList();
-    final completedCount = completedJobs.length;
-    final totalEarnings = completedJobs.fold<double>(0.0, (acc, b) => acc + (b.totalAmount ?? 0.0));
-    final jobPosts = MySqlService().jobPosts;
+        final allBookings = MySqlService().bookings;
 
-    return Scaffold(
-      backgroundColor: AppTheme.sbSurface,
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
+        final myWorkerProfiles = MySqlService().workerProfiles.where((wp) =>
+            (currentUserId != null && currentUserId != 0 && wp.userId == currentUserId) ||
+            (currentUserUid != null && currentUserUid.isNotEmpty && wp.user?.uid == currentUserUid) ||
+            (currentUserEmail != null && currentUserEmail.isNotEmpty && wp.user?.email.toLowerCase().trim() == currentUserEmail)
+        ).toList();
+        final myWorkerProfileIds = myWorkerProfiles.map((wp) => wp.workerProfileId).toSet();
+        final myWorkerUserIds = myWorkerProfiles.map((wp) => wp.userId).toSet();
+
+        // Filter bookings belonging exclusively to this worker
+        final myWorkerBookings = allBookings.where((b) {
+          if (currentUser == null) return false;
+          // 1. Direct match on workerId
+          if (currentUserId != null && currentUserId != 0 && b.workerId == currentUserId) return true;
+          if (myWorkerProfileIds.contains(b.workerId)) return true;
+          if (myWorkerUserIds.contains(b.workerId)) return true;
+
+          // 2. Direct match on workerUid
+          if (currentUserUid != null && currentUserUid.isNotEmpty) {
+            if (b.workerUid != null && b.workerUid == currentUserUid) return true;
+            if (b.worker?.uid != null && b.worker!.uid == currentUserUid) return true;
+          }
+
+          // 3. Worker user model ID or email
+          if (b.worker != null) {
+            if (currentUserId != null && currentUserId != 0 && b.worker!.id == currentUserId) return true;
+            if (currentUserEmail != null && currentUserEmail.isNotEmpty && b.worker!.email.toLowerCase().trim() == currentUserEmail) return true;
+          }
+          return false;
+        }).toList();
+
+        final pendingRequests = myWorkerBookings.where((b) => b.status == 'pending').toList();
+        final completedJobs = myWorkerBookings.where((b) => b.status == 'completed').toList();
+        final completedCount = completedJobs.length;
+        final totalEarnings = completedJobs.fold<double>(0.0, (acc, b) => acc + (b.totalAmount ?? 0.0));
+        final jobPosts = MySqlService().jobPosts.where((jp) => jp.status == 'open' || jp.status == 'in_review').toList();
+
+        return Scaffold(
+          backgroundColor: AppTheme.sbSurface,
+          body: RefreshIndicator(
+            onRefresh: () => MySqlService().refreshData(),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Column(
+                children: [
             // Header: homehead with availability switch
             Container(
               decoration: const BoxDecoration(
@@ -253,19 +306,25 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                                             width: 44,
                                             height: 44,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) => const Center(
-                                              child: Icon(
-                                                Icons.person_rounded,
-                                                color: Colors.white,
-                                                size: 24,
+                                            errorBuilder: (_, __, ___) => Center(
+                                              child: Text(
+                                                userInitials,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
                                               ),
                                             ),
                                           )
-                                        : const Center(
-                                            child: Icon(
-                                              Icons.person_rounded,
-                                              color: Colors.white,
-                                              size: 24,
+                                        : Center(
+                                            child: Text(
+                                              userInitials,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                              ),
                                             ),
                                           ),
                                   ),
@@ -537,7 +596,15 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(completedCount > 0 ? '5.0' : 'New', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.sbInk)),
+                              Row(
+                                children: [
+                                  Text(completedCount > 0 ? '5.0' : 'New', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.sbInk)),
+                                  if (completedCount > 0) ...[
+                                    const SizedBox(width: 3),
+                                    const Icon(Icons.star_rounded, size: 16, color: AppTheme.sbYellowGreen),
+                                  ],
+                                ],
+                              ),
                               const SizedBox(height: 2),
                               const Text('Average rating', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: AppTheme.sbInk4)),
                             ],
@@ -615,7 +682,8 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                   else
                     ...pendingRequests.map((b) {
                       final cName = b.customer?.fullName ?? b.customer?.name ?? 'Client';
-                      final cInitials = (cName.isNotEmpty) ? cName[0] : 'C';
+                      final cPhoto = b.customer?.profilePhotoUrl;
+                      final cInitials = (cName.isNotEmpty) ? cName[0].toUpperCase() : 'C';
                       final sTitle = b.serviceName ?? b.categoryName ?? 'Service Request';
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
@@ -623,6 +691,7 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                           initials: cInitials,
                           avatarColor: const Color(0xFF0B1B33),
                           name: cName,
+                          photoUrl: cPhoto,
                           desc: '$sTitle · ${b.scheduledTime ?? 'Flexible'}',
                           chipText: b.isUrgent ? 'Urgent · Pending' : 'Pending',
                           chipColor: b.isUrgent ? AppTheme.sbRedSoft : AppTheme.sbBlueSoft,
@@ -678,6 +747,9 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                     )
                   else
                     ...jobPosts.take(3).map((jp) {
+                      final cName = jp.customer?.fullName ?? jp.customer?.name ?? 'Client';
+                      final cPhoto = jp.customer?.profilePhotoUrl;
+                      final cInitials = (cName.isNotEmpty) ? cName[0].toUpperCase() : 'C';
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _buildQuickJobCard(
@@ -686,8 +758,11 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                           tagColor: jp.urgency == 'urgent' ? AppTheme.sbRedSoft : AppTheme.sbAmberSoft,
                           tagTextColor: jp.urgency == 'urgent' ? AppTheme.sbRed : const Color(0xFFA55F00),
                           title: jp.title ?? 'Job Request',
-                          meta: '${jp.locationAddress ?? 'Local Area'} · ${jp.status}',
+                          meta: '${jp.locationAddress ?? (jp.city ?? 'Local Area')} · ${jp.status}',
                           budget: '₱${jp.budgetMin?.toInt() ?? 0} – ₱${jp.budgetMax?.toInt() ?? 0}',
+                          customerPhoto: cPhoto,
+                          customerName: cName,
+                          customerInitials: cInitials,
                           onBid: () => _openBidModal(jp),
                         ),
                       );
@@ -698,8 +773,11 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+},
+);
+}
 
   Widget _buildBarColumn(String label, int value, {bool isDim = false}) {
     final heightRatio = value / 80.0;
@@ -742,6 +820,7 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
     required Color chipColor,
     required Color chipTextColor,
     required VoidCallback onTap,
+    String? photoUrl,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -761,11 +840,27 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
                 color: avatarColor,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Center(
-                child: Text(
-                  initials,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
-                ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: (photoUrl != null && photoUrl.isNotEmpty)
+                    ? Image.network(
+                        photoUrl,
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Text(
+                            initials,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          initials,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                        ),
+                      ),
               ),
             ),
             const SizedBox(width: 12),
@@ -807,6 +902,9 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
     required String meta,
     required String budget,
     required VoidCallback onBid,
+    String? customerPhoto,
+    String customerName = 'Client',
+    String customerInitials = 'C',
   }) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -819,33 +917,93 @@ class _WorkerDashboardScreenState extends State<WorkerDashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: AppTheme.sbBlueSoft,
-                  borderRadius: BorderRadius.circular(99),
+                  color: const Color(0xFF0B1B33),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: Text(
-                  category,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppTheme.sbBlue),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: (customerPhoto != null && customerPhoto.isNotEmpty)
+                      ? Image.network(
+                          customerPhoto,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Text(
+                              customerInitials,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        )
+                      : Center(
+                          child: Text(
+                            customerInitials,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
                 ),
               ),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                decoration: BoxDecoration(
-                  color: tagColor,
-                  borderRadius: BorderRadius.circular(99),
-                ),
-                child: Text(
-                  tag,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: tagTextColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      customerName,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.sbInk,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.sbBlueSoft,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            category,
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppTheme.sbBlue),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: tagColor,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            tag,
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: tagTextColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             title,
             style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppTheme.sbInk, height: 1.3),

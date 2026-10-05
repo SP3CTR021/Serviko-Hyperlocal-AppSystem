@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../models/message_model.dart';
 import '../../services/auth_service.dart';
+import '../../services/firestore_service.dart';
 import '../../services/mysql_service.dart';
 import '../../theme/app_theme.dart';
 import '../chat/chat_screen.dart';
@@ -41,49 +43,75 @@ class WorkerMainScreenState extends State<WorkerMainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = AuthService();
-    final user = auth.currentUser;
-    final userName = user?.fullName ?? user?.name ?? 'Worker';
-    final pendingBookingsCount = MySqlService().bookings
-        .where((b) => b.status == 'pending')
-        .length;
+    return ListenableBuilder(
+      listenable: Listenable.merge([MySqlService(), AuthService()]),
+      builder: (context, _) {
+        final auth = AuthService();
+        final user = auth.currentUser;
+        final userName = user?.fullName ?? user?.name ?? 'Worker';
+        final currentUserId = user?.id;
+        final currentUserUid = user?.uid;
+        final currentUserEmail = user?.email.toLowerCase().trim();
 
-    final screens = [
-      WorkerDashboardScreen(onOpenDrawer: openDrawer, onNavigateTab: setTab),
-      WorkerBookingsScreen(onOpenDrawer: openDrawer),
-      JobMarketplaceScreen(onOpenDrawer: openDrawer),
-      ChatListScreen(onOpenDrawer: openDrawer),
-      ProfileScreen(onOpenDrawer: openDrawer),
-    ];
+        final pendingBookingsCount = MySqlService().bookings.where((b) {
+          if (user == null || b.status != 'pending') return false;
+          if (currentUserId != null && currentUserId != 0 && b.workerId == currentUserId) return true;
+          if (b.worker != null) {
+            if (currentUserId != null && currentUserId != 0 && b.worker!.id == currentUserId) return true;
+            if (currentUserUid != null && currentUserUid.isNotEmpty && b.worker!.uid == currentUserUid) return true;
+            if (currentUserEmail != null && currentUserEmail.isNotEmpty && b.worker!.email.toLowerCase().trim() == currentUserEmail) return true;
+          }
+          return false;
+        }).length;
 
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: AppTheme.sbSurface,
-      endDrawer: _buildDrawer(context, userName),
-      body: Stack(
-        children: [
-          // Current Tab Page
-          Positioned.fill(
-            bottom: 74,
-            child: IndexedStack(
-              index: _currentIndex,
-              children: screens,
-            ),
+        final screens = [
+          WorkerDashboardScreen(onOpenDrawer: openDrawer, onNavigateTab: setTab),
+          WorkerBookingsScreen(onOpenDrawer: openDrawer),
+          JobMarketplaceScreen(onOpenDrawer: openDrawer),
+          ChatListScreen(onOpenDrawer: openDrawer),
+          ProfileScreen(onOpenDrawer: openDrawer),
+        ];
+
+        return Scaffold(
+          key: _scaffoldKey,
+          backgroundColor: AppTheme.sbSurface,
+          endDrawer: _buildDrawer(context, userName),
+          body: Stack(
+            children: [
+              // Current Tab Page
+              Positioned.fill(
+                bottom: 74,
+                child: IndexedStack(
+                  index: _currentIndex,
+                  children: screens,
+                ),
+              ),
+
+              // Floating Glass Bottom Tab Bar
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 12,
+                child: StreamBuilder<List<MessageModel>>(
+                  stream: FirestoreService().getAllMessagesStream(),
+                  builder: (context, msgSnap) {
+                    final allMsgs = msgSnap.data ?? MySqlService().messages;
+                    final currentUserIdNum = user?.id ?? 0;
+                    final unreadChatCount = currentUserIdNum != 0
+                        ? allMsgs.where((m) => m.receiverId == currentUserIdNum && !m.isRead).length
+                        : 0;
+                    return _buildBottomBar(pendingBookingsCount, unreadChatCount);
+                  },
+                ),
+              ),
+            ],
           ),
-
-          // Floating Glass Bottom Tab Bar
-          Positioned(
-            left: 14,
-            right: 14,
-            bottom: 12,
-            child: _buildBottomBar(pendingBookingsCount),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildBottomBar(int pendingCount) {
+  Widget _buildBottomBar(int pendingCount, int unreadChatCount) {
     return Container(
       height: 64,
       decoration: BoxDecoration(
@@ -111,7 +139,7 @@ class WorkerMainScreenState extends State<WorkerMainScreen> {
           _buildTabItem(0, Icons.home_rounded, 'Home'),
           _buildTabItem(1, Icons.calendar_today_rounded, 'Bookings', badgeCount: pendingCount),
           _buildTabItem(2, Icons.work_outline_rounded, 'Jobs'),
-          _buildTabItem(3, Icons.chat_bubble_rounded, 'Chat', badgeCount: 0),
+          _buildTabItem(3, Icons.chat_bubble_rounded, 'Chat', badgeCount: unreadChatCount),
           _buildTabItem(4, Icons.person_rounded, 'Profile'),
         ],
       ),
@@ -170,7 +198,7 @@ class WorkerMainScreenState extends State<WorkerMainScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                     decoration: BoxDecoration(
-                      color: AppTheme.sbAmber2,
+                      color: AppTheme.sbYellowGreen,
                       borderRadius: BorderRadius.circular(99),
                       border: Border.all(color: const Color(0xFF10140F), width: 1.5),
                     ),
@@ -178,9 +206,9 @@ class WorkerMainScreenState extends State<WorkerMainScreen> {
                       child: Text(
                         '$badgeCount',
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: Color(0xFF0F1710),
                           fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
